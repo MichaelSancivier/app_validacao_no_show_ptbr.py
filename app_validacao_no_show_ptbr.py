@@ -42,7 +42,7 @@ REGRAS_EMBUTIDAS = [
 ]
 
 # ==============================
-# Utilitários
+# Utilitários (normalização + regex tolerante)
 # ==============================
 def rm_acc(s: str) -> str:
     return ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn')
@@ -87,11 +87,11 @@ def template_to_regex_flex(template: str) -> re.Pattern:
     except re.error:
         return re.compile(r"^\s*" + re.escape(t) + r"\s*$", flags=re.IGNORECASE)
 
-# Pré-compila regras
+# Pré-compila regras: {(causa_canon, motivo_canon): (motivo_original, regex, mascara_modelo)}
 RULES_MAP = {}
 for r in REGRAS_EMBUTIDAS:
     key = (canon(r["causa"]), canon(r["motivo"]))
-    RULES_MAP[key] = (r["motivo"], template_to_regex_flex(r["mascara_modelo"]))
+    RULES_MAP[key] = (r["motivo"], template_to_regex_flex(r["mascara_modelo"]), r["mascara_modelo"])
 
 def detect_motivo_and_mask(full_text: str):
     """Detecta o motivo dentro do texto completo comparando com as regras conhecidas."""
@@ -102,7 +102,7 @@ def detect_motivo_and_mask(full_text: str):
     causa_padrao = "Agendamento cancelado."
     causa_padrao_c = canon(causa_padrao)
 
-    for (c_norm, m_norm), (motivo_original, _regex) in RULES_MAP.items():
+    for (c_norm, m_norm), (motivo_original, _regex, _modelo) in RULES_MAP.items():
         if c_norm != causa_padrao_c:
             continue
         if m_norm in txt_c:
@@ -134,17 +134,23 @@ if file:
     df = read_any(file)
     col = st.selectbox("Selecione a coluna única (Causa. Motivo. Mascara...)", df.columns)
 
-    resultados = []
-    detalhes = []
-    for i, row in df.iterrows():
+    resultados, detalhes = [], []
+    causas, motivos, mascaras = [], [], []
+
+    for _, row in df.iterrows():
         causa, motivo, mascara = detect_motivo_and_mask(row.get(col, ""))
+        causas.append(causa)
+        motivos.append(motivo)
+        mascaras.append(mascara)
+
         key = (canon(causa), canon(motivo))
         found = RULES_MAP.get(key)
         if not found:
             resultados.append("No-show Técnico")
             detalhes.append("Motivo não reconhecido nas regras embutidas.")
             continue
-        motivo_original, regex = found
+
+        _motivo_oficial, regex, _modelo = found
         mascara_norm = re.sub(r"\s+", " ", str(mascara)).strip()
         if regex.fullmatch(mascara_norm):
             resultados.append("Máscara correta")
@@ -154,6 +160,11 @@ if file:
             detalhes.append("Não casa com o modelo (mesmo no modo tolerante).")
 
     out = df.copy()
+    # 🔹 novas colunas separadas
+    out["Causa detectada"] = causas
+    out["Motivo detectado"] = motivos
+    out["Máscara prestador"] = mascaras
+    # colunas já existentes
     out["Classificação No-show"] = resultados
     out["Detalhe"] = detalhes
 
@@ -169,3 +180,4 @@ if file:
                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 else:
     st.info("Envie a exportação e selecione a coluna única para iniciar.")
+
