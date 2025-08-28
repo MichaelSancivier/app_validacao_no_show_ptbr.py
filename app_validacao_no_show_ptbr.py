@@ -1,64 +1,26 @@
+
 import io
 import re
 import unicodedata
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="Validador de No-show (PT-BR)", layout="wide")
-st.title("Validador de No-show — PT-BR")
+st.set_page_config(page_title="Validador de No-show — Uma Coluna (PT-BR)", layout="wide")
+st.title("Validador de No-show — Uma Coluna (PT-BR)")
 
-# ===== Funções auxiliares (mesmas do final) =====
-def remove_acentos(s: str) -> str:
-    import unicodedata
-    return ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn')
+st.markdown("""
+Selecione **apenas uma coluna** que contenha o texto completo no formato:
 
-def norm(s: str) -> str:
-    if pd.isna(s):
-        return ""
-    s = str(s)
-    s = remove_acentos(s).lower()
-    s = re.sub(r"[.;:\\s]+$", "", s)
-    s = re.sub(r"\\s+", " ", s).strip()
-    return s
+**`Causa. Motivo. Mascara (preenchida pelo prestador)...`**
 
-def dividir_texto_uma_coluna(value: str):
-    txt = re.sub(r"\\s+", " ", str(value)).strip()
-    m = re.match(r"^(.*?\\.)\\s+(.*?\\.)\\s+(.*)$", txt)
-    if m:
-        return m.group(1).strip(), m.group(2).strip(), m.group(3).strip()
-    partes = [p.strip() for p in txt.split(".")]
-    if len(partes) >= 3:
-        causa = partes[0] + "."
-        motivo = partes[1] + "."
-        mascara = ".".join(partes[2:]).strip()
-        return causa, motivo, mascara
-    return "", "", txt
+O app identifica o **Motivo** baseado nas **regras embutidas** e valida a **Máscara** usando o modelo
+(dos `0` como *placeholders*). Os dados preenchidos pelo prestador **não interferem** na validação,
+pois os `0` aceitam qualquer conteúdo.
+""")
 
-def modelo_para_regex(template: str):
-    if pd.isna(template):
-        template = ""
-    t = re.sub(r"\\s+", " ", str(template)).strip()
-    partes = re.split(r"0+", t)
-    fixos = [re.escape(p) for p in partes]
-    corpo = r"(.+?)".join(fixos)
-    corpo = re.sub(r"\\ ", r"\\s+", corpo)
-    padrao = r"^\\s*" + corpo + r"\\s*$"
-    import re as _re
-    try:
-        return _re.compile(padrao, flags=_re.IGNORECASE | _re.DOTALL)
-    except _re.error:
-        return _re.compile(r"^\\s*" + _re.escape(t) + r"\\s*$", flags=_re.IGNORECASE)
-
-def construir_mapa_regras(regras):
-    mapa = {}
-    for item in regras:
-        causa = norm(item.get("causa", ""))
-        motivo = norm(item.get("motivo", ""))
-        modelo = item.get("mascara_modelo", "")
-        mapa[(causa, motivo)] = modelo_para_regex(modelo)
-    return mapa
-
-# Regras: importamos do arquivo final já gerado
+# ==============================
+# Regras embutidas (15)
+# ==============================
 REGRAS_EMBUTIDAS = [
     {"causa":"Agendamento cancelado.","motivo":"Atendimento Improdutivo – Ponto Fixo","mascara_modelo":"Veículo compareceu para atendimento, porém por 0, não foi possível realizar o serviço."},
     {"causa":"Agendamento cancelado.","motivo":"Cancelada a Pedido do Cliente","mascara_modelo":"Cliente 0 , contato via 0 em 0 - 0, informou indisponibilidade para o atendimento."},
@@ -77,79 +39,112 @@ REGRAS_EMBUTIDAS = [
     {"causa":"Agendamento cancelado.","motivo":"Cancelamento a pedido da RT","mascara_modelo":"Acordado novo agendamento com o cliente  0 no dia  00, via  - 0, pelo motivo - 0"},
 ]
 
-with st.sidebar:
-    st.header("➕ Regras extras (opcional)")
-    st.caption("Cole novas regras no formato:\\n\\nCAUSA: ...\\nMOTIVO: ...\\nMASCARA_MODELO: ...\\n---")
-    texto = st.text_area("Cole aqui (uma ou mais, separadas por '---')", height=220)
-    import re as _re
-    def parse(texto):
-        if not texto:
-            return []
-        blocos = _re.split(r"^---\\s*$", texto, flags=_re.MULTILINE)
-        items = []
-        for b in blocos:
-            b = b.strip()
-            if not b: 
-                continue
-            c = _re.search(r"(?mi)^\\s*CAUSA\\s*:\\s*(.+)$", b)
-            m = _re.search(r"(?mi)^\\s*MOTIVO\\s*:\\s*(.+)$", b)
-            mm = _re.search(r"(?mi)^\\s*MASCARA_MODELO\\s*:\\s*(.+)$", b)
-            if c and m and mm:
-                items.append({"causa": c.group(1).strip(), "motivo": m.group(1).strip(), "mascara_modelo": mm.group(1).strip()})
-        return items
-    regras_extras = parse(texto)
+# ==============================
+# Utilitários
+# ==============================
+def rm_acc(s: str) -> str:
+    return ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn')
 
-# Uploader apenas da exportação
-arq_exp = st.file_uploader("Exportação (xlsx/csv) — contém muitas colunas", type=["xlsx","csv"])
+def canon(s: str) -> str:
+    """Normaliza texto para comparação robusta: sem acentos, minúsculas, normaliza traços e espaços."""
+    if pd.isna(s):
+        return ""
+    s = str(s)
+    s = s.replace("–", "-").replace("—", "-")
+    s = rm_acc(s).lower()
+    s = re.sub(r"[.;:\\s]+$", "", s)
+    s = re.sub(r"\\s+", " ", s).strip()
+    return s
 
-def ler_arquivo(f):
+def template_to_regex(template: str):
+    if pd.isna(template):
+        template = ""
+    t = re.sub(r"\\s+", " ", str(template)).strip()
+    parts = re.split(r"0+", t)
+    fixed = [re.escape(p) for p in parts]
+    body = r"(.+?)".join(fixed)
+    body = re.sub(r"\\ ", r"\\s+", body)
+    pat = r"^\\s*" + body + r"\\s*$"
+    try:
+        return re.compile(pat, flags=re.IGNORECASE | re.DOTALL)
+    except re.error:
+        return re.compile(r"^\\s*" + re.escape(t) + r"\\s*$", flags=re.IGNORECASE)
+
+# Pré-compila regras: mapa {(causa_norm, motivo_norm): (motivo_original, regex)}
+RULES_MAP = {}
+for r in REGRAS_EMBUTIDAS:
+    key = (canon(r["causa"]), canon(r["motivo"]))
+    RULES_MAP[key] = (r["motivo"], template_to_regex(r["mascara_modelo"]))
+
+def detect_motivo_and_mask(full_text: str):
+    """
+    Detecta qual 'motivo' das regras aparece no texto completo e retorna (causa, motivo, mascara).
+    - Causa padrão: 'Agendamento cancelado.'
+    - Mascara = sufixo após o motivo detectado (sem interferência dos dados do prestador)
+    """
+    if not full_text:
+        return "", "", ""
+    txt = re.sub(r"\\s+", " ", str(full_text)).strip()
+    txt_c = canon(txt)
+    causa_padrao = "Agendamento cancelado."
+    causa_padrao_c = canon(causa_padrao)
+
+    # tenta achar o primeiro motivo conhecido contido no texto
+    for (c_norm, m_norm), (motivo_original, _regex) in RULES_MAP.items():
+        if c_norm != causa_padrao_c:
+            continue
+        if m_norm in txt_c:
+            # encontra índice aproximado do término do motivo na versão "canon"
+            idx = txt_c.find(m_norm) + len(m_norm)
+            # extrai máscara aproximando pelo comprimento; robusto o bastante pq validaremos por regex
+            mascara = txt[idx:]
+            mascara = mascara.strip(" .")
+            return causa_padrao, motivo_original, mascara
+    # fallback: não achou motivo -> tudo vira mascara
+    return "", "", txt
+
+# ==============================
+# Entrada: só uma coluna
+# ==============================
+file = st.file_uploader("Exportação (xlsx/csv) — escolha uma coluna com 'Causa. Motivo. Mascara...'", type=["xlsx","csv"])
+
+def read_any(f):
     if f is None:
         return None
-    nome = f.name.lower()
-    if nome.endswith(".csv"):
+    name = f.name.lower()
+    if name.endswith(".csv"):
         try:
             return pd.read_csv(f, sep=None, engine="python")
         except Exception:
             f.seek(0); return pd.read_csv(f)
-    # Excel: tenta usar openpyxl e dá mensagem amigável se faltar
     try:
         return pd.read_excel(f, engine="openpyxl")
-    except ImportError as e:
-        st.error("Faltou a dependência **openpyxl** para ler arquivos Excel (.xlsx). "
-                 "Confirme que o `requirements.txt` do repositório contém a linha `openpyxl` "
-                 "e faça o *Rebuild* da aplicação. Como alternativa, exporte seu arquivo como **CSV** e reenvie.")
-        raise
     except Exception:
-        # tenta sem especificar engine
-        f.seek(0)
-        return pd.read_excel(f)
+        f.seek(0); return pd.read_excel(f)
 
-if arq_exp:
-    df_exp = ler_arquivo(arq_exp)
-    col_exp = st.selectbox("Escolha a coluna que contém 'Causa. Motivo. Mascara...':", df_exp.columns, index=0)
-
-    regras_ativas = list(REGRAS_EMBUTIDAS)
-    if regras_extras:
-        regras_ativas.extend(regras_extras)
-    mapa = construir_mapa_regras(regras_ativas)
+if file:
+    df = read_any(file)
+    col = st.selectbox("Selecione a coluna única (Causa. Motivo. Mascara...)", df.columns)
 
     resultados = []
-    for _, row in df_exp.iterrows():
-        texto = row.get(col_exp, "")
-        causa, motivo, mascara = dividir_texto_uma_coluna(texto)
-        regex = mapa.get((norm(causa), norm(motivo)))
+    for _, row in df.iterrows():
+        causa, motivo, mascara = detect_motivo_and_mask(row.get(col, ""))
+        regex = RULES_MAP.get((canon(causa), canon(motivo)), (None, None))[1]
         mascara_norm = re.sub(r"\\s+", " ", str(mascara)).strip()
         resultados.append("Máscara correta" if (regex and regex.fullmatch(mascara_norm)) else "No-show Técnico")
 
-    saida = df_exp.copy()
-    saida["Classificação No-show"] = resultados
-    st.dataframe(saida, use_container_width=True)
+    out = df.copy()
+    out["Classificação No-show"] = resultados
 
+    st.success("Validação concluída.")
+    st.dataframe(out, use_container_width=True)
+
+    # Download
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as w:
-        saida.to_excel(w, index=False, sheet_name="Resultado")
+        out.to_excel(w, index=False, sheet_name="Resultado")
     st.download_button("Baixar Excel com 'Classificação No-show'", data=buf.getvalue(),
                        file_name="resultado_no_show.xlsx",
                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 else:
-    st.info("Envie a exportação para iniciar a validação.")
+    st.info("Envie a exportação e selecione a coluna única para iniciar.")
