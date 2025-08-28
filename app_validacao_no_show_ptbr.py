@@ -4,13 +4,16 @@ import unicodedata
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="Validador de No-show — Uma Coluna (PT-BR) [FLEX]", layout="wide")
-st.title("Validador de No-show — Uma Coluna (PT-BR) [FLEX]")
+st.set_page_config(page_title="Validador de No-show — Uma Coluna (PT-BR) [FLEX + Regra Especial]", layout="wide")
+st.title("Validador de No-show — Uma Coluna (PT-BR) [FLEX + Regra Especial]")
 
 st.markdown("""
 Selecione **apenas uma coluna** que contenha o texto completo no formato:
 
 **`Causa. Motivo. Mascara (preenchida pelo prestador)...`**
+
+E (opcional) selecione uma **coluna especial** onde, se o valor for **`Automático - PORTAL`**, a classificação será forçada para **`No-show Cliente`**.
+Caso o valor seja diferente, a validação segue as regras normais (Causa + Motivo + Máscara).
 
 Este modo é **tolerante** a pequenas variações de pontuação e espaços:
 - vírgula opcional (ex.: `, via` ou ` via`),
@@ -111,11 +114,6 @@ def detect_motivo_and_mask(full_text: str):
             return causa_padrao, motivo_original, mascara
     return "", "", txt
 
-# ==============================
-# Entrada: só uma coluna
-# ==============================
-file = st.file_uploader("Exportação (xlsx/csv) — escolha 1 coluna com 'Causa. Motivo. Mascara...'", type=["xlsx","csv"])
-
 def read_any(f):
     if f is None:
         return None
@@ -130,19 +128,40 @@ def read_any(f):
     except Exception:
         f.seek(0); return pd.read_excel(f)
 
+# ==============================
+# Entrada: coluna única + coluna especial (opcional)
+# ==============================
+file = st.file_uploader("Exportação (xlsx/csv) — escolha 1 coluna com 'Causa. Motivo. Mascara...'", type=["xlsx","csv"])
+
 if file:
     df = read_any(file)
-    col = st.selectbox("Selecione a coluna única (Causa. Motivo. Mascara...)", df.columns)
+    col_main = st.selectbox("Selecione a coluna única (Causa. Motivo. Mascara...)", df.columns)
+    col_especial = st.selectbox("Coluna especial (opcional) — se for 'Automático - PORTAL' classifica como No-show Cliente", ["(Nenhuma)"] + list(df.columns))
 
     resultados, detalhes = [], []
     causas, motivos, mascaras = [], [], []
+    combos = []  # nova coluna concatenada "Causa. Motivo. Máscara"
 
     for _, row in df.iterrows():
-        causa, motivo, mascara = detect_motivo_and_mask(row.get(col, ""))
+        # Detecta sempre causa/motivo/máscara a partir da coluna principal
+        causa, motivo, mascara = detect_motivo_and_mask(row.get(col_main, ""))
         causas.append(causa)
         motivos.append(motivo)
         mascaras.append(mascara)
 
+        # Monta a coluna extra "Causa. Motivo. Máscara"
+        partes = [p for p in [str(causa).strip(), str(motivo).strip(), str(mascara).strip()] if p]
+        combos.append(" ".join(partes))
+
+        # Regra especial: Automático - PORTAL
+        if col_especial != "(Nenhuma)":
+            valor_especial = row.get(col_especial, "")
+            if canon(valor_especial) == canon("Automático - PORTAL"):
+                resultados.append("No-show Cliente")
+                detalhes.append("Regra especial aplicada: coluna especial = 'Automático - PORTAL'.")
+                continue  # não precisa validar regex
+
+        # Fluxo normal: valida máscara pelo motivo detectado
         key = (canon(causa), canon(motivo))
         found = RULES_MAP.get(key)
         if not found:
@@ -164,6 +183,8 @@ if file:
     out["Causa detectada"] = causas
     out["Motivo detectado"] = motivos
     out["Máscara prestador"] = mascaras
+    # 🔹 nova coluna combinada (pedido)
+    out["Causa. Motivo. Máscara (extra)"] = combos
     # colunas já existentes
     out["Classificação No-show"] = resultados
     out["Detalhe"] = detalhes
@@ -179,5 +200,4 @@ if file:
                        file_name="resultado_no_show.xlsx",
                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 else:
-    st.info("Envie a exportação e selecione a coluna única para iniciar.")
-
+    st.info("Envie a exportação; selecione a coluna única e (opcionalmente) a coluna especial.")
