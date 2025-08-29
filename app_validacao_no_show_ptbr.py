@@ -141,7 +141,7 @@ if file:
     resultados, detalhes = [], []
     causas, motivos, mascaras = [], [], []
     combos = []                 # "Causa. Motivo. Máscara" (extra)
-    mascaras_modelo = []        # << NOVA: Máscara prestador (modelo esperado)
+    mascaras_modelo = []        # Máscara prestador (modelo esperado)
 
     for _, row in df.iterrows():
         # Detecta sempre causa/motivo/máscara a partir da coluna principal
@@ -189,13 +189,18 @@ if file:
     # 🔹 colunas separadas
     out["Causa detectada"] = causas
     out["Motivo detectado"] = motivos
-    out["Máscara prestador (preenchida)"] = mascaras   # renomeada
-    out["Máscara prestador"] = mascaras_modelo         # NOVA: o modelo esperado (com 0)
+    out["Máscara prestador (preenchida)"] = mascaras
+    out["Máscara prestador"] = mascaras_modelo
     # 🔹 coluna combinada (pedido)
     out["Causa. Motivo. Máscara (extra)"] = combos
     # 🔹 colunas de status
     out["Classificação No-show"] = resultados
     out["Detalhe"] = detalhes
+    # 🔹 nova coluna: Resultado No Show (mapeia 'Máscara correta' -> 'No-show Cliente')
+    out["Resultado No Show"] = [
+        "No-show Cliente" if r == "Máscara correta" else "No-show Técnico"
+        for r in resultados
+    ]
 
     st.success("Validação concluída.")
     st.dataframe(out, use_container_width=True)
