@@ -140,7 +140,8 @@ if file:
 
     resultados, detalhes = [], []
     causas, motivos, mascaras = [], [], []
-    combos = []  # nova coluna concatenada "Causa. Motivo. Máscara"
+    combos = []                 # "Causa. Motivo. Máscara" (extra)
+    mascaras_modelo = []        # << NOVA: Máscara prestador (modelo esperado)
 
     for _, row in df.iterrows():
         # Detecta sempre causa/motivo/máscara a partir da coluna principal
@@ -148,10 +149,11 @@ if file:
         causas.append(causa)
         motivos.append(motivo)
         mascaras.append(mascara)
-
-        # Monta a coluna extra "Causa. Motivo. Máscara"
         partes = [p for p in [str(causa).strip(), str(motivo).strip(), str(mascara).strip()] if p]
         combos.append(" ".join(partes))
+
+        # por padrão, modelo vazio; será preenchido se reconhecermos o motivo
+        mascara_modelo_val = ""
 
         # Regra especial: Automático - PORTAL
         if col_especial != "(Nenhuma)":
@@ -159,6 +161,7 @@ if file:
             if canon(valor_especial) == canon("Automático - PORTAL"):
                 resultados.append("No-show Cliente")
                 detalhes.append("Regra especial aplicada: coluna especial = 'Automático - PORTAL'.")
+                mascaras_modelo.append(mascara_modelo_val)  # fica vazio, pois não validamos pelo modelo
                 continue  # não precisa validar regex
 
         # Fluxo normal: valida máscara pelo motivo detectado
@@ -167,9 +170,11 @@ if file:
         if not found:
             resultados.append("No-show Técnico")
             detalhes.append("Motivo não reconhecido nas regras embutidas.")
+            mascaras_modelo.append(mascara_modelo_val)
             continue
 
-        _motivo_oficial, regex, _modelo = found
+        _motivo_oficial, regex, modelo = found
+        mascara_modelo_val = modelo or ""
         mascara_norm = re.sub(r"\s+", " ", str(mascara)).strip()
         if regex.fullmatch(mascara_norm):
             resultados.append("Máscara correta")
@@ -178,14 +183,17 @@ if file:
             resultados.append("No-show Técnico")
             detalhes.append("Não casa com o modelo (mesmo no modo tolerante).")
 
+        mascaras_modelo.append(mascara_modelo_val)
+
     out = df.copy()
-    # 🔹 novas colunas separadas
+    # 🔹 colunas separadas
     out["Causa detectada"] = causas
     out["Motivo detectado"] = motivos
-    out["Máscara prestador"] = mascaras
-    # 🔹 nova coluna combinada (pedido)
+    out["Máscara prestador (preenchida)"] = mascaras   # renomeada
+    out["Máscara prestador"] = mascaras_modelo         # NOVA: o modelo esperado (com 0)
+    # 🔹 coluna combinada (pedido)
     out["Causa. Motivo. Máscara (extra)"] = combos
-    # colunas já existentes
+    # 🔹 colunas de status
     out["Classificação No-show"] = resultados
     out["Detalhe"] = detalhes
 
