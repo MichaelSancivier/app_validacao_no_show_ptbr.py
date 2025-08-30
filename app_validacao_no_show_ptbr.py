@@ -198,8 +198,8 @@ if file:
     out["Detalhe"] = detalhes
     # 🔹 nova coluna: Resultado No Show (mapeia 'Máscara correta' -> 'No-show Cliente')
     out["Resultado No Show"] = [
-        "No-show Cliente" if r == "Máscara correta" else "No-show Técnico"
-        for r in resultados
+    "No-show Cliente" if r == "Máscara correta" else "No-show Técnico"
+    for r in resultados
     ]
 
     st.success("Validação concluída.")
