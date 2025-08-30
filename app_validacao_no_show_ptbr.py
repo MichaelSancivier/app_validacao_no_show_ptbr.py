@@ -216,8 +216,7 @@ else:
     st.info("Envie a exportação; selecione a coluna única e (opcionalmente) a coluna especial.")
 
 # =====================================================================
-# MODO 2: Conferência (Dupla checagem atendente x robô)
-# Adicione este bloco ao final do arquivo.
+# MODO 2: Conferência (Dupla checagem atendente x robô) — BLOCO CONSOLIDADO
 # =====================================================================
 
 st.markdown("---")
@@ -230,7 +229,8 @@ O app calcula:
 - **Concordância por linha**: `OK`, `Divergência` ou `Pendência (vazio)`
 - **Acurácia geral** (% de linhas `OK`)
 - **Matriz de concordância** (Cliente/Técnico)
-- Arquivo para download com colunas de auditoria
+- **Indicadores**: % Desvios RT, % Desvios atendente, % RPA, % Atendimento Humano
+- Exporta um Excel com **3 abas**: Conferencia, Indicadores e Matriz
 """)
 
 conf_file = st.file_uploader("Relatório conferido (xlsx/csv)", type=["xlsx", "csv"], key="conf")
@@ -275,7 +275,7 @@ if conf_file:
         if "tecnico" in c or "técnico" in c:
             return "no-show tecnico"
         if "mascara correta" in c or "máscara correta" in c:
-            # sua regra de negócio mapeia para cliente
+            # regra de negócio: máscara correta conta como cliente
             return "no-show cliente"
         return c  # devolve normalizado para análises livres
 
@@ -305,82 +305,67 @@ if conf_file:
         dfo["Obs. atendente"] = obs_list
     dfo["Conferência - status"] = estados
 
-    # Métricas
+    # Métricas básicas
     total = len(dfo)
-    ok = sum(dfo["Conferência - status"] == "OK")
-    pend = sum(dfo["Conferência - status"] == "Pendência (vazio)")
-    div = sum(dfo["Conferência - status"] == "Divergência")
+    ok = int((dfo["Conferência - status"] == "OK").sum())
+    pend = int((dfo["Conferência - status"] == "Pendência (vazio)").sum())
+    div = int((dfo["Conferência - status"] == "Divergência").sum())
     acc = (ok / total * 100.0) if total else 0.0
 
     st.subheader("Resumo")
     st.write(f"**Total:** {total}  |  **OK:** {ok}  |  **Divergência:** {div}  |  **Pendência:** {pend}  |  **Acurácia:** {acc:.1f}%")
 
+    # --- Indicadores (KPIs) ---
+    desvio_rt = (div / total * 100.0) if total else 0.0           # Robô divergiu do atendente
+    desvio_atendente = (pend / total * 100.0) if total else 0.0    # Pendências do atendente
+    perc_rpa = (ok / total * 100.0) if total else 0.0              # Casos resolvidos pelo robô (OK)
+    perc_humano = ((div + pend) / total * 100.0) if total else 0.0 # Precisou intervenção humana
+
+    st.subheader("Indicadores")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("% Desvios RT", f"{desvio_rt:.1f}%")
+    c2.metric("% Desvios atendente", f"{desvio_atendente:.1f}%")
+    c3.metric("% RPA", f"{perc_rpa:.1f}%")
+    c4.metric("% Atendimento Humano", f"{perc_humano:.1f}%")
+
     # Matriz simples de concordância (cliente/técnico)
-    with st.expander("Matriz de concordância (normalizada)"):
-        try:
-            cm = pd.crosstab(dfo["Robô (normalizado)"], dfo["Atendente (normalizado)"])
-            st.dataframe(cm, use_container_width=True)
-        except Exception:
-            st.info("Não foi possível montar a matriz com os valores atuais.")
+    st.subheader("Matriz de concordância (normalizada)")
+    try:
+        cm = pd.crosstab(dfo["Robô (normalizado)"], dfo["Atendente (normalizado)"])
+        st.dataframe(cm, use_container_width=True)
+    except Exception:
+        st.info("Não foi possível montar a matriz com os valores atuais.")
 
     st.subheader("Prévia da planilha de auditoria")
     st.dataframe(dfo, use_container_width=True)
 
-    # Download Excel
+    # --- Exporta Excel com 3 abas: Conferencia + Indicadores + Matriz ---
+    indicadores = pd.DataFrame([
+        {"Métrica": "Total", "Valor": total},
+        {"Métrica": "OK", "Valor": ok},
+        {"Métrica": "Divergência", "Valor": div},
+        {"Métrica": "Pendência", "Valor": pend},
+        {"Métrica": "% Desvios RT", "Valor": round(desvio_rt, 1)},
+        {"Métrica": "% Desvios atendente", "Valor": round(desvio_atendente, 1)},
+        {"Métrica": "% RPA", "Valor": round(perc_rpa, 1)},
+        {"Métrica": "% Atendimento Humano", "Valor": round(perc_humano, 1)},
+        {"Métrica": "Acurácia (%)", "Valor": round(acc, 1)},
+    ])
+
     outbuf = io.BytesIO()
     with pd.ExcelWriter(outbuf, engine="openpyxl") as w:
         dfo.to_excel(w, index=False, sheet_name="Conferencia")
+        indicadores.to_excel(w, index=False, sheet_name="Indicadores")
+        try:
+            cm.to_excel(w, sheet_name="Matriz")
+        except Exception:
+            pass
+
     st.download_button(
-        "Baixar Excel da conferência",
+        "Baixar Excel da conferência (com Indicadores)",
         data=outbuf.getvalue(),
         file_name="conferencia_no_show.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 else:
     st.info("Para rodar a dupla checagem, envie o relatório conferido e mapeie as colunas.")
-
-# --- Indicadores ---
-desvio_rt = (div / total * 100.0) if total else 0.0                  # Robô divergiu do atendente
-desvio_atendente = (pend / total * 100.0) if total else 0.0           # Pendências do atendente
-perc_rpa = (ok / total * 100.0) if total else 0.0                     # Casos resolvidos pelo robô (OK)
-perc_humano = ((div + pend) / total * 100.0) if total else 0.0        # Precisou intervenção humana
-
-st.subheader("Indicadores")
-c1, c2, c3, c4 = st.columns(4)
-c1.metric("% Desvios RT", f"{desvio_rt:.1f}%")
-c2.metric("% Desvios atendente", f"{desvio_atendente:.1f}%")
-c3.metric("% RPA", f"{perc_rpa:.1f}%")
-c4.metric("% Atendimento Humano", f"{perc_humano:.1f}%")
-
-# --- Monta DataFrame de indicadores para export ---
-indicadores = pd.DataFrame([
-    {"Métrica": "Total", "Valor": total},
-    {"Métrica": "OK", "Valor": ok},
-    {"Métrica": "Divergência", "Valor": div},
-    {"Métrica": "Pendência", "Valor": pend},
-    {"Métrica": "% Desvios RT", "Valor": round(desvio_rt, 1)},
-    {"Métrica": "% Desvios atendente", "Valor": round(desvio_atendente, 1)},
-    {"Métrica": "% RPA", "Valor": round(perc_rpa, 1)},
-    {"Métrica": "% Atendimento Humano", "Valor": round(perc_humano, 1)},
-])
-
-# --- Exporta Excel com 2 abas: Conferencia + Indicadores (+ opcional Matriz) ---
-outbuf = io.BytesIO()
-with pd.ExcelWriter(outbuf, engine="openpyxl") as w:
-    dfo.to_excel(w, index=False, sheet_name="Conferencia")
-    indicadores.to_excel(w, index=False, sheet_name="Indicadores")
-    # opcional: incluir matriz de concordância
-    try:
-        cm = pd.crosstab(dfo["Robô (normalizado)"], dfo["Atendente (normalizado)"])
-        cm.to_excel(w, sheet_name="Matriz")
-    except Exception:
-        pass
-
-st.download_button(
-    "Baixar Excel da conferência (com Indicadores)",
-    data=outbuf.getvalue(),
-    file_name="conferencia_no_show.xlsx",
-    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-)
-
-
