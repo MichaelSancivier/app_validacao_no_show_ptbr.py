@@ -216,24 +216,22 @@ else:
     st.info("Envie a exportação; selecione a coluna única e (opcionalmente) a coluna especial.")
 
 # =====================================================================
-# MODO 2: Conferência (Dupla checagem atendente x robô) — BLOCO CONSOLIDADO
+# MODO 2: Conferência (multi-duplas Robô × Atendente)
 # =====================================================================
 
 st.markdown("---")
-st.header("Conferência (Dupla checagem)")
+st.header("Conferência (Dupla checagem) — múltiplas comparações")
 
 st.markdown("""
-Envie o **relatório conferido pelo atendente** (xlsx/csv) para comparar com a pré-análise do robô.
-
-O app calcula:
-- **Concordância por linha**: `OK`, `Divergência` ou `Pendência (vazio)`
-- **Acurácia geral** (% de linhas `OK`)
-- **Matriz de concordância** (Cliente/Técnico)
-- **Indicadores**: % Desvios RT, % Desvios atendente, % RPA, % Atendimento Humano
-- Exporta um Excel com **3 abas**: Conferencia, Indicadores e Matriz
+Envie o **relatório conferido pelo atendente** (xlsx/csv).  
+Mapeie **duplas de comparação** (coluna do Robô × coluna do Atendente).  
+O status **Geral** da linha é:
+- **OK**: todas as duplas mapeadas estão OK
+- **Pendência (vazio)**: alguma dupla tem valor do atendente vazio
+- **Divergência**: pelo menos uma dupla diverge
 """)
 
-conf_file = st.file_uploader("Relatório conferido (xlsx/csv)", type=["xlsx", "csv"], key="conf")
+conf_file = st.file_uploader("Relatório conferido (xlsx/csv)", type=["xlsx", "csv"], key="conf-multi")
 
 def read_any_loose(f):
     if f is None:
@@ -241,112 +239,153 @@ def read_any_loose(f):
     name = f.name.lower()
     if name.endswith(".csv"):
         try:
-            return pd.read_csv(f, sep=None, engine="python")
+            return pd.read_csv(f, sep=None, engine="python", skip_blank_lines=True)
         except Exception:
             f.seek(0); return pd.read_csv(f)
     try:
-        return pd.read_excel(f, engine="openpyxl")
+        df = pd.read_excel(f, engine="openpyxl")
+        # heurística: se cabeçalho veio "Unnamed", tenta pular 1 linha
+        if str(df.columns[0]).lower().startswith("unnamed"):
+            f.seek(0)
+            df = pd.read_excel(f, engine="openpyxl", skiprows=1)
+        return df
     except Exception:
         f.seek(0); return pd.read_excel(f)
 
+# normalizador para saídas cliente/técnico (e similares)
+def normalize_outcome(x: str) -> str:
+    c = canon(x)
+    if "cliente" in c:
+        return "no-show cliente"
+    if "tecnico" in c or "técnico" in c:
+        return "no-show tecnico"
+    if "mascara correta" in c or "máscara correta" in c:
+        # regra de negócio: máscara correta conta como cliente
+        return "no-show cliente"
+    # devolve o texto canônico (útil para outros campos)
+    return c
+
+if "pairs_n" not in st.session_state:
+    st.session_state.pairs_n = 3   # 3 duplas por padrão
+
 if conf_file:
     dfr = read_any_loose(conf_file)
+    cols = list(dfr.columns)
 
-    st.subheader("Mapeamento de colunas")
-    col_robot = st.selectbox(
-        "Coluna do ROBÔ com o resultado (ex.: 'Resultado No Show' ou 'Classificação No-show')",
-        dfr.columns,
-        index=max(0, list(dfr.columns).index("Resultado No Show")) if "Resultado No Show" in dfr.columns else 0
-    )
-    col_att_res = st.selectbox(
-        "Coluna do ATENDENTE com o resultado validado (ex.: 'Resultado validado (atendente)')",
-        dfr.columns
-    )
-    col_att_obs = st.selectbox(
-        "Coluna de observações do atendente (opcional)",
-        ["(Nenhuma)"] + list(dfr.columns)
-    )
+    st.subheader("Duplas de comparação (Robô × Atendente)")
+    cbtn1, cbtn2, _ = st.columns([1,1,6])
+    if cbtn1.button("➕ Adicionar dupla"):
+        st.session_state.pairs_n += 1
+    if st.session_state.pairs_n > 1 and cbtn2.button("➖ Remover última"):
+        st.session_state.pairs_n -= 1
 
-    # Normalizador de rótulos “cliente/técnico”
-    def normalize_outcome(x: str) -> str:
-        c = canon(x)
-        if "cliente" in c:
-            return "no-show cliente"
-        if "tecnico" in c or "técnico" in c:
-            return "no-show tecnico"
-        if "mascara correta" in c or "máscara correta" in c:
-            # regra de negócio: máscara correta conta como cliente
-            return "no-show cliente"
-        return c  # devolve normalizado para análises livres
+    # desenha selects para N duplas
+    pair_defs = []
+    for i in range(st.session_state.pairs_n):
+        st.markdown(f"**Dupla {i+1}**")
+        c1, c2 = st.columns(2)
+        robo_col = c1.selectbox(f"Robô — coluna #{i+1}", cols, key=f"robot_col_{i}")
+        att_col  = c2.selectbox(f"Atendente — coluna #{i+1}", cols, key=f"att_col_{i}")
+        pair_defs.append((robo_col, att_col))
 
-    # Avaliação linha a linha
-    estados, robot_norm, att_norm, obs_list = [], [], [], []
+    # computa comparações
+    linhas_status_geral = []
+    pair_status_cols = {i: [] for i in range(st.session_state.pairs_n)}
+    pair_robo_norm_cols = {i: [] for i in range(st.session_state.pairs_n)}
+    pair_att_norm_cols  = {i: [] for i in range(st.session_state.pairs_n)}
+
     for _, r in dfr.iterrows():
-        robo = r.get(col_robot, "")
-        att  = r.get(col_att_res, "")
-        obsv = r.get(col_att_obs, "") if col_att_obs != "(Nenhuma)" else ""
+        tem_pendencia = False
+        tem_div = False
+        for i, (rc, ac) in enumerate(pair_defs):
+            robo_val = r.get(rc, "")
+            att_val  = r.get(ac, "")
 
-        rn = normalize_outcome(robo)
-        an = normalize_outcome(att)
+            rn = normalize_outcome(robo_val)
+            an = normalize_outcome(att_val)
 
-        robot_norm.append(rn)
-        att_norm.append(an)
-        obs_list.append(obsv)
+            pair_robo_norm_cols[i].append(rn)
+            pair_att_norm_cols[i].append(an)
 
-        if not str(att).strip():
-            estados.append("Pendência (vazio)")
+            if not str(att_val).strip():
+                pair_status_cols[i].append("Pendência (vazio)")
+                tem_pendencia = True
+            else:
+                if rn == an:
+                    pair_status_cols[i].append("OK")
+                else:
+                    pair_status_cols[i].append("Divergência")
+                    tem_div = True
+
+        if tem_pendencia:
+            linhas_status_geral.append("Pendência (vazio)")
         else:
-            estados.append("OK" if rn == an else "Divergência")
+            linhas_status_geral.append("Divergência" if tem_div else "OK")
 
     dfo = dfr.copy()
-    dfo["Robô (normalizado)"] = robot_norm
-    dfo["Atendente (normalizado)"] = att_norm
-    if col_att_obs != "(Nenhuma)":
-        dfo["Obs. atendente"] = obs_list
-    dfo["Conferência - status"] = estados
+    # adiciona colunas por dupla
+    for i in range(st.session_state.pairs_n):
+        dfo[f"Dupla {i+1} — Robô (norm)"] = pair_robo_norm_cols[i]
+        dfo[f"Dupla {i+1} — Atendente (norm)"] = pair_att_norm_cols[i]
+        dfo[f"Dupla {i+1} — Status"] = pair_status_cols[i]
 
-    # Métricas básicas
+    dfo["Conferência — Status geral"] = linhas_status_geral
+
+    # métricas gerais (baseadas no status geral)
     total = len(dfo)
-    ok = int((dfo["Conferência - status"] == "OK").sum())
-    pend = int((dfo["Conferência - status"] == "Pendência (vazio)").sum())
-    div = int((dfo["Conferência - status"] == "Divergência").sum())
-    acc = (ok / total * 100.0) if total else 0.0
+    ok   = int((dfo["Conferência — Status geral"] == "OK").sum())
+    pend = int((dfo["Conferência — Status geral"] == "Pendência (vazio)").sum())
+    div  = int((dfo["Conferência — Status geral"] == "Divergência").sum())
+    acc  = (ok / total * 100.0) if total else 0.0
 
     st.subheader("Resumo")
     st.write(f"**Total:** {total}  |  **OK:** {ok}  |  **Divergência:** {div}  |  **Pendência:** {pend}  |  **Acurácia:** {acc:.1f}%")
 
-    # --- Indicadores (KPIs) ---
-    desvio_rt = (div / total * 100.0) if total else 0.0           # Robô divergiu do atendente
-    desvio_atendente = (pend / total * 100.0) if total else 0.0    # Pendências do atendente
-    perc_rpa = (ok / total * 100.0) if total else 0.0              # Casos resolvidos pelo robô (OK)
-    perc_humano = ((div + pend) / total * 100.0) if total else 0.0 # Precisou intervenção humana
+    # Indicadores (como combinado)
+    desvio_rt       = (div / total * 100.0) if total else 0.0
+    desvio_atend    = (pend / total * 100.0) if total else 0.0
+    perc_rpa        = (ok / total * 100.0) if total else 0.0
+    perc_humano     = ((div + pend) / total * 100.0) if total else 0.0
 
     st.subheader("Indicadores")
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("% Desvios RT", f"{desvio_rt:.1f}%")
-    c2.metric("% Desvios atendente", f"{desvio_atendente:.1f}%")
-    c3.metric("% RPA", f"{perc_rpa:.1f}%")
-    c4.metric("% Atendimento Humano", f"{perc_humano:.1f}%")
+    k1,k2,k3,k4 = st.columns(4)
+    k1.metric("% Desvios RT", f"{desvio_rt:.1f}%")
+    k2.metric("% Desvios atendente", f"{desvio_atend:.1f}%")
+    k3.metric("% RPA", f"{perc_rpa:.1f}%")
+    k4.metric("% Atendimento Humano", f"{perc_humano:.1f}%")
 
-    # Matriz simples de concordância (cliente/técnico)
-    st.subheader("Matriz de concordância (normalizada)")
-    try:
-        cm = pd.crosstab(dfo["Robô (normalizado)"], dfo["Atendente (normalizado)"])
-        st.dataframe(cm, use_container_width=True)
-    except Exception:
-        st.info("Não foi possível montar a matriz com os valores atuais.")
+    # Tabela de divergências por dupla
+    st.subheader("Divergências por dupla")
+    div_por_dupla = []
+    for i in range(st.session_state.pairs_n):
+        q = (pd.Series(pair_status_cols[i]) == "Divergência").sum()
+        div_por_dupla.append({"Dupla": i+1, "Divergências": int(q)})
+    st.dataframe(pd.DataFrame(div_por_dupla), use_container_width=True)
 
+    # Matrizes de concordância por dupla
+    st.subheader("Matrizes de concordância (por dupla)")
+    matrizes = {}
+    for i in range(st.session_state.pairs_n):
+        try:
+            cm = pd.crosstab(pd.Series(pair_robo_norm_cols[i], name="Robô norm"),
+                             pd.Series(pair_att_norm_cols[i],  name="Atendente norm"))
+            matrizes[i] = cm
+            st.markdown(f"**Dupla {i+1}**")
+            st.dataframe(cm, use_container_width=True)
+        except Exception:
+            st.info(f"Não foi possível montar a matriz para a dupla {i+1}.")
+
+    # Exporta Excel multi-aba
     st.subheader("Prévia da planilha de auditoria")
     st.dataframe(dfo, use_container_width=True)
 
-    # --- Exporta Excel com 3 abas: Conferencia + Indicadores + Matriz ---
     indicadores = pd.DataFrame([
         {"Métrica": "Total", "Valor": total},
         {"Métrica": "OK", "Valor": ok},
         {"Métrica": "Divergência", "Valor": div},
         {"Métrica": "Pendência", "Valor": pend},
         {"Métrica": "% Desvios RT", "Valor": round(desvio_rt, 1)},
-        {"Métrica": "% Desvios atendente", "Valor": round(desvio_atendente, 1)},
+        {"Métrica": "% Desvios atendente", "Valor": round(desvio_atend, 1)},
         {"Métrica": "% RPA", "Valor": round(perc_rpa, 1)},
         {"Métrica": "% Atendimento Humano", "Valor": round(perc_humano, 1)},
         {"Métrica": "Acurácia (%)", "Valor": round(acc, 1)},
@@ -356,16 +395,15 @@ if conf_file:
     with pd.ExcelWriter(outbuf, engine="openpyxl") as w:
         dfo.to_excel(w, index=False, sheet_name="Conferencia")
         indicadores.to_excel(w, index=False, sheet_name="Indicadores")
-        try:
-            cm.to_excel(w, sheet_name="Matriz")
-        except Exception:
-            pass
+        # uma aba de matriz por dupla
+        for i, cm in matrizes.items():
+            cm.to_excel(w, sheet_name=f"Matriz_P{i+1}")
 
     st.download_button(
-        "Baixar Excel da conferência (com Indicadores)",
+        "Baixar Excel da conferência (multi-duplas)",
         data=outbuf.getvalue(),
         file_name="conferencia_no_show.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 else:
-    st.info("Para rodar a dupla checagem, envie o relatório conferido e mapeie as colunas.")
+    st.info("Para rodar a conferência, envie o relatório e mapeie as duplas (Robô × Atendente).")
