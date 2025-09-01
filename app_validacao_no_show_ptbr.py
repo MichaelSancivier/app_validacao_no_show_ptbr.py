@@ -71,7 +71,7 @@ def template_to_regex_flex(template: str) -> re.Pattern:
     except re.error:
         return re.compile(r"^\s*" + re.escape(t) + r"\s*$", flags=re.IGNORECASE)
 
-# Pré-compila mapa de regras
+# Mapa pré-compilado das regras
 RULES_MAP = {}
 for r in REGRAS_EMBUTIDAS:
     key = (canon(r["causa"]), canon(r["motivo"]))
@@ -137,7 +137,7 @@ if file:
     mascaras_modelo = []
 
     for _, row in df.iterrows():
-        # Detecta sempre causa/motivo/máscara a partir da coluna principal
+        # Detecta causa/motivo/máscara a partir da coluna principal
         causa, motivo, mascara = detect_motivo_and_mask(row.get(col_main, ""))
         causas.append(causa)
         motivos.append(motivo)
@@ -178,7 +178,7 @@ if file:
         mascaras_modelo.append(mascara_modelo_val)
 
     out = df.copy()
-    # Colunas de saída (pré-análise)
+    # Colunas calculadas
     out["Causa detectada"] = causas
     out["Motivo detectado"] = motivos
     out["Máscara prestador (preenchida)"] = mascaras_preenchidas
@@ -220,29 +220,64 @@ if file:
         designados.extend([nomes_list[i]] * bloco)
     designados = designados[:total_linhas]
 
-    # >>> Inserir "Atendente designado" ANTES de "Causa detectada"
+    # Inserir "Atendente designado" ANTES de "Causa detectada"
     try:
         pos = out.columns.get_loc("Causa detectada")
         out.insert(pos, "Atendente designado", designados)
     except Exception:
-        # fallback: se por algum motivo não achar a coluna, adiciona no final
-        out["Atendente designado"] = designados
+        out["Atendente designado"] = designados  # fallback
 
-    # Feedback visual
-    with st.expander("Resumo por atendente (alocação)"):
-        resumo = (pd.Series(designados).value_counts().rename_axis("Atendente")
-                  .reset_index(name="Qtde registros").sort_values("Atendente"))
-        st.dataframe(resumo, use_container_width=True)
+    # ==============================
+    # Seleção de colunas para exportar (Pré-análise)
+    # ==============================
+    st.markdown("### Exportação — seleção de colunas")
+    export_all_pre = st.checkbox(
+        "Exportar **todas** as colunas (originais + geradas)",
+        value=True,
+        help="Desmarque para escolher manualmente quais colunas vão para o Excel."
+    )
+
+    # ordem sugerida das geradas para manter 'Atendente' antes de 'Causa detectada'
+    geradas_order = [
+        "Atendente designado",
+        "Causa detectada",
+        "Motivo detectado",
+        "Máscara prestador (preenchida)",
+        "Máscara prestador",
+        "Causa. Motivo. Máscara (extra)",
+        "Classificação No-show",
+        "Detalhe",
+        "Resultado No Show",
+    ]
+    originais = [c for c in df.columns if c in out.columns]
+    geradas   = [c for c in geradas_order if c in out.columns]
+    todas_cols_pre = originais + geradas
+
+    if export_all_pre:
+        cols_export_pre = todas_cols_pre
+    else:
+        st.caption("Escolha as colunas que irão para o arquivo (ordem respeitada):")
+        default_pre = [c for c in ["O.S.", "MOTIVO CANCELAMENTO", "Atendente designado",
+                                   "Causa detectada", "Motivo detectado",
+                                   "Classificação No-show", "Resultado No Show"] if c in todas_cols_pre]
+        cols_export_pre = st.multiselect(
+            "Colunas para exportar",
+            options=todas_cols_pre,
+            default=default_pre
+        )
+        if not cols_export_pre:
+            st.warning("Nenhuma coluna selecionada. Exportarei todas as colunas.")
+            cols_export_pre = todas_cols_pre
 
     # Prévia e download (um único arquivo com tudo)
     st.success("Validação concluída.")
-    st.dataframe(out, use_container_width=True)
+    st.dataframe(out[cols_export_pre], use_container_width=True)
 
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as w:
-        out.to_excel(w, index=False, sheet_name="Resultado")
+        out[cols_export_pre].to_excel(w, index=False, sheet_name="Resultado")
     st.download_button(
-        "Baixar Excel — Pré-análise (com Atendente designado)",
+        "Baixar Excel — Pré-análise (com seleção de colunas)",
         data=buf.getvalue(),
         file_name="resultado_no_show.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -456,33 +491,61 @@ if conf_file:
         except Exception:
             st.info(f"Não foi possível montar a matriz para a dupla **{pair_labels[i]}**.")
 
-    # Exporta Excel multi-aba
-    st.subheader("Prévia da planilha de auditoria")
-    st.dataframe(dfo, use_container_width=True)
+    # ==============================
+    # Exportação — seleção de conteúdo (Conferência)
+    # ==============================
+    st.markdown("### Exportação — seleção de conteúdo")
 
-    indicadores = pd.DataFrame([
-        {"Métrica": "Total", "Valor": total},
-        {"Métrica": "OK", "Valor": ok},
-        {"Métrica": "Divergência", "Valor": div},
-        {"Métrica": "Pendência", "Valor": pend},
-        {"Métrica": "% Desvios RT", "Valor": round(desvio_rt, 1)},
-        {"Métrica": "% Desvios atendente", "Valor": round(desvio_att, 1)},
-        {"Métrica": "% RPA", "Valor": round(perc_rpa, 1)},
-        {"Métrica": "% Atendimento Humano", "Valor": round(perc_humano, 1)},
-        {"Métrica": "Acurácia (%)", "Valor": round(acc, 1)},
-    ])
+    exp_conf   = st.checkbox("Incluir aba **Conferencia**", value=True)
+    exp_kpis   = st.checkbox("Incluir aba **Indicadores**", value=True)
+    exp_duplas = st.checkbox("Incluir aba **Indicadores_por_dupla**", value=True)
+    exp_mats   = st.checkbox("Incluir **Matriz_<Dupla>**", value=True)
 
+    export_all_conf = st.checkbox(
+        "Conferencia: exportar **todas** as colunas",
+        value=True,
+        help="Desmarque para escolher manualmente as colunas da aba Conferencia."
+    )
+
+    if export_all_conf:
+        cols_export_conf = list(dfo.columns)
+    else:
+        st.caption("Escolha as colunas da aba **Conferencia** (ordem respeitada):")
+        favs = [c for c in dfo.columns if any(k in c for k in ["Status geral", "Status", "Robô (norm)", "Atendente (norm)"])]
+        base_defaults = [c for c in dfr.columns if c in dfo.columns][:5]
+        default_conf = list(dict.fromkeys(base_defaults + favs))[:20] or list(dfo.columns)[:20]
+        cols_export_conf = st.multiselect("Colunas para a aba Conferencia", options=list(dfo.columns), default=default_conf)
+        if not cols_export_conf:
+            st.warning("Sem colunas selecionadas para a aba Conferencia — exportarei todas.")
+            cols_export_conf = list(dfo.columns)
+
+    # Exporta Excel com seleção
     outbuf = io.BytesIO()
     with pd.ExcelWriter(outbuf, engine="openpyxl") as w:
-        dfo.to_excel(w, index=False, sheet_name="Conferencia")
-        indicadores.to_excel(w, index=False, sheet_name="Indicadores")
-        df_ind_duplas.to_excel(w, index=False, sheet_name="Indicadores_por_dupla")
-        for i, cm in matrizes.items():
-            sheet = safe_sheet_name(f"Matriz_{pair_labels[i]}")
-            cm.to_excel(w, sheet_name=sheet)
+        if exp_conf:
+            dfo[cols_export_conf].to_excel(w, index=False, sheet_name="Conferencia")
+        if exp_kpis:
+            indicadores = pd.DataFrame([
+                {"Métrica": "Total", "Valor": total},
+                {"Métrica": "OK", "Valor": ok},
+                {"Métrica": "Divergência", "Valor": div},
+                {"Métrica": "Pendência", "Valor": pend},
+                {"Métrica": "% Desvios RT", "Valor": round(desvio_rt, 1)},
+                {"Métrica": "% Desvios atendente", "Valor": round(desvio_att, 1)},
+                {"Métrica": "% RPA", "Valor": round(perc_rpa, 1)},
+                {"Métrica": "% Atendimento Humano", "Valor": round(perc_humano, 1)},
+                {"Métrica": "Acurácia (%)", "Valor": round(acc, 1)},
+            ])
+            indicadores.to_excel(w, index=False, sheet_name="Indicadores")
+        if exp_duplas:
+            df_ind_duplas.to_excel(w, index=False, sheet_name="Indicadores_por_dupla")
+        if exp_mats and matrizes:
+            for i, cm in matrizes.items():
+                sheet = safe_sheet_name(f"Matriz_{pair_labels[i]}")
+                cm.to_excel(w, sheet_name=sheet)
 
     st.download_button(
-        "Baixar Excel da conferência (multi-duplas)",
+        "Baixar Excel da conferência (seleção aplicada)",
         data=outbuf.getvalue(),
         file_name="conferencia_no_show.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
