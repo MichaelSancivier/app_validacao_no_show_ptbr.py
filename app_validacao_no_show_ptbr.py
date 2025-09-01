@@ -111,7 +111,7 @@ def read_any(f):
         f.seek(0); return pd.read_excel(f)
 
 # ============================================================
-# (Opcional) Adicionar regras rápidas (runtime) — Opção B
+# (Opcional) Adicionar regras rápidas (runtime)
 # ============================================================
 st.markdown("#### (Opcional) Adicionar regras rápidas (runtime)")
 with st.expander("Adicionar novas regras **sem editar** o código"):
@@ -182,6 +182,35 @@ with st.expander("Adicionar novas regras **sem editar** o código"):
             st.success(f"✅ {len(extras)} regra(s) adicionada(s)/atualizada(s). Já estão ativas nesta sessão.")
             with st.expander("Ver últimas regras aplicadas"):
                 st.write(pd.DataFrame(extras))
+# ============================================================
+# Botão para exportar TODAS as regras atuais (embutidas + rápidas)
+# ============================================================
+import json
+from datetime import datetime
+
+st.markdown("#### Exportar regras (JSON)")
+
+# Ordena por motivo (só para deixar bonito no arquivo)
+def _sort_key(r):
+    return (str(r.get("causa", "")).lower(), str(r.get("motivo", "")).lower())
+
+regras_atuais = sorted(REGRAS_EMBUTIDAS, key=_sort_key)
+
+# Prepara conteúdo JSON legível
+json_str = json.dumps(regras_atuais, ensure_ascii=False, indent=2)
+fname = f"regras_no_show_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+
+st.download_button(
+    label="📥 Baixar regras atuais (JSON)",
+    data=json_str.encode("utf-8"),
+    file_name=fname,
+    mime="application/json",
+    help="Exporta todas as regras ativas neste momento (inclui as adicionadas em runtime)."
+)
+
+# (Opcional) Mostrar um preview em tabela
+with st.expander("Pré-visualizar regras (tabela)"):
+    st.dataframe(pd.DataFrame(regras_atuais), use_container_width=True)
 
 # ------------------------------------------------------------
 # MÓDULO 1 — PRÉ-ANÁLISE (VALIDADOR)
