@@ -6,6 +6,13 @@ App **Streamlit** para:
 
 ---
 
+## Formatos de entrada
+- Aceita **Excel (.xlsx)** e **CSV (.csv)** em ambos os módulos.  
+- O app detecta automaticamente o tipo e, no caso de CSV, tenta identificar o separador.  
+- Se o arquivo tiver cabeçalhos “sujos” (ex.: linha “TABELA …”), o app pula automaticamente ou basta limpar antes de subir.
+
+---
+
 ## Novidades de Exportação
 
 ### Módulo 1 — Pré-análise
