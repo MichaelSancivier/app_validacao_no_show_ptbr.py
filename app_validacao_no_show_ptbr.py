@@ -1,31 +1,20 @@
 import io
 import re
+import math
 import unicodedata
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="Validador de No-show — Uma Coluna (PT-BR) [FLEX + Regra Especial]", layout="wide")
-st.title("Validador de No-show — Uma Coluna (PT-BR) [FLEX + Regra Especial]")
+# ------------------------------------------------------------
+# CONFIG
+# ------------------------------------------------------------
+st.set_page_config(page_title="Validador de No-show — PT-BR", layout="wide")
+st.title("Validador de No-show — PT-BR")
 
-st.markdown("""
-Selecione **apenas uma coluna** que contenha o texto completo no formato:
 
-**`Causa. Motivo. Mascara (preenchida pelo prestador)...`**
-
-E (opcional) selecione uma **coluna especial** onde, se o valor for **`Automático - PORTAL`**, a classificação será forçada para **`No-show Cliente`**.
-Caso o valor seja diferente, a validação segue as regras normais (Causa + Motivo + Máscara).
-
-Este modo é **tolerante** a pequenas variações de pontuação e espaços:
-- vírgula opcional (ex.: `, via` ou ` via`),
-- hífen/tipos de traço (`-`, `–`, `—`),
-- espaços extras ou pontuação grudada nos valores dos `0`.
-
-Os `0` do modelo são **placeholders** e aceitam qualquer conteúdo preenchido pelo prestador.
-""")
-
-# ==============================
-# Regras embutidas (15)
-# ==============================
+# ------------------------------------------------------------
+# REGRAS EMBUTIDAS (15)
+# ------------------------------------------------------------
 REGRAS_EMBUTIDAS = [
     {"causa":"Agendamento cancelado.","motivo":"Atendimento Improdutivo – Ponto Fixo","mascara_modelo":"Veículo compareceu para atendimento, porém por 0, não foi possível realizar o serviço."},
     {"causa":"Agendamento cancelado.","motivo":"Cancelada a Pedido do Cliente","mascara_modelo":"Cliente 0 , contato via 0 em 0 - 0, informou indisponibilidade para o atendimento."},
@@ -44,14 +33,14 @@ REGRAS_EMBUTIDAS = [
     {"causa":"Agendamento cancelado.","motivo":"Cancelamento a pedido da RT","mascara_modelo":"Acordado novo agendamento com o cliente  0 no dia  00, via  - 0, pelo motivo - 0"},
 ]
 
-# ==============================
-# Utilitários (normalização + regex tolerante)
-# ==============================
+
+# ------------------------------------------------------------
+# UTILITÁRIOS (normalização + regex tolerante)
+# ------------------------------------------------------------
 def rm_acc(s: str) -> str:
     return ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn')
 
 def canon(s: str) -> str:
-    """Normaliza texto para comparação: sem acentos, minúsculas, normaliza traços e espaços."""
     if pd.isna(s):
         return ""
     s = str(s)
@@ -62,13 +51,6 @@ def canon(s: str) -> str:
     return s
 
 def _flexify_fixed_literal(escaped: str) -> str:
-    """
-    Torna o trecho fixo do modelo mais tolerante:
-    - espaço -> \s+
-    - vírgula -> [\s,]*
-    - hífen -> aceita - – —
-    - ponto -> [\.\s]*
-    """
     escaped = escaped.replace(r"\ ", r"\s+")
     escaped = escaped.replace(r"\,", r"[\s,]*")
     escaped = escaped.replace(r"\-", r"[\-\–\—]\s*")
@@ -76,7 +58,6 @@ def _flexify_fixed_literal(escaped: str) -> str:
     return escaped
 
 def template_to_regex_flex(template: str) -> re.Pattern:
-    """Transforma o modelo em regex tolerante."""
     if pd.isna(template):
         template = ""
     t = re.sub(r"\s+", " ", str(template)).strip()
@@ -90,14 +71,14 @@ def template_to_regex_flex(template: str) -> re.Pattern:
     except re.error:
         return re.compile(r"^\s*" + re.escape(t) + r"\s*$", flags=re.IGNORECASE)
 
-# Pré-compila regras: {(causa_canon, motivo_canon): (motivo_original, regex, mascara_modelo)}
+# Pré-compila mapa de regras
 RULES_MAP = {}
 for r in REGRAS_EMBUTIDAS:
     key = (canon(r["causa"]), canon(r["motivo"]))
     RULES_MAP[key] = (r["motivo"], template_to_regex_flex(r["mascara_modelo"]), r["mascara_modelo"])
 
+
 def detect_motivo_and_mask(full_text: str):
-    """Detecta o motivo dentro do texto completo comparando com as regras conhecidas."""
     if not full_text:
         return "", "", ""
     txt = re.sub(r"\s+", " ", str(full_text)).strip()
@@ -114,6 +95,7 @@ def detect_motivo_and_mask(full_text: str):
             return causa_padrao, motivo_original, mascara
     return "", "", txt
 
+
 def read_any(f):
     if f is None:
         return None
@@ -128,27 +110,38 @@ def read_any(f):
     except Exception:
         f.seek(0); return pd.read_excel(f)
 
-# ==============================
-# Entrada: coluna única + coluna especial (opcional)
-# ==============================
-file = st.file_uploader("Exportação (xlsx/csv) — escolha 1 coluna com 'Causa. Motivo. Mascara...'", type=["xlsx","csv"])
+
+# ------------------------------------------------------------
+# MÓDULO 1 — PRÉ-ANÁLISE (VALIDADOR)
+# ------------------------------------------------------------
+st.header("Módulo 1 — Validador (Pré-análise)")
+st.markdown("""
+Selecione **uma coluna** com o texto completo no formato:
+
+**`Causa. Motivo. Mascara (preenchida pelo prestador)...`**
+
+E (opcional) selecione uma **coluna especial**: se o valor for **`Automático - PORTAL`**, a linha será classificada como **No-show Cliente**.
+""")
+
+file = st.file_uploader("Exportação (xlsx/csv) — coluna única + (opcional) coluna especial", type=["xlsx","csv"])
 
 if file:
     df = read_any(file)
-    col_main = st.selectbox("Selecione a coluna única (Causa. Motivo. Mascara...)", df.columns)
-    col_especial = st.selectbox("Coluna especial (opcional) — se for 'Automático - PORTAL' classifica como No-show Cliente", ["(Nenhuma)"] + list(df.columns))
+    col_main = st.selectbox("Coluna principal (Causa. Motivo. Mascara...)", df.columns)
+    col_especial = st.selectbox("Coluna especial (opcional) — valor 'Automático - PORTAL' força No-show Cliente",
+                                ["(Nenhuma)"] + list(df.columns))
 
     resultados, detalhes = [], []
-    causas, motivos, mascaras = [], [], []
-    combos = []                 # "Causa. Motivo. Máscara" (extra)
-    mascaras_modelo = []        # Máscara prestador (modelo esperado)
+    causas, motivos, mascaras_preenchidas = [], [], []
+    combos = []
+    mascaras_modelo = []
 
     for _, row in df.iterrows():
         # Detecta sempre causa/motivo/máscara a partir da coluna principal
         causa, motivo, mascara = detect_motivo_and_mask(row.get(col_main, ""))
         causas.append(causa)
         motivos.append(motivo)
-        mascaras.append(mascara)
+        mascaras_preenchidas.append(mascara)
         partes = [p for p in [str(causa).strip(), str(motivo).strip(), str(mascara).strip()] if p]
         combos.append(" ".join(partes))
 
@@ -161,8 +154,8 @@ if file:
             if canon(valor_especial) == canon("Automático - PORTAL"):
                 resultados.append("No-show Cliente")
                 detalhes.append("Regra especial aplicada: coluna especial = 'Automático - PORTAL'.")
-                mascaras_modelo.append(mascara_modelo_val)  # fica vazio, pois não validamos pelo modelo
-                continue  # não precisa validar regex
+                mascaras_modelo.append(mascara_modelo_val)
+                continue  # pula validação regex
 
         # Fluxo normal: valida máscara pelo motivo detectado
         key = (canon(causa), canon(motivo))
@@ -182,57 +175,96 @@ if file:
         else:
             resultados.append("No-show Técnico")
             detalhes.append("Não casa com o modelo (mesmo no modo tolerante).")
-
         mascaras_modelo.append(mascara_modelo_val)
 
     out = df.copy()
-    # 🔹 colunas separadas
+    # Colunas de saída (pré-análise)
     out["Causa detectada"] = causas
     out["Motivo detectado"] = motivos
-    out["Máscara prestador (preenchida)"] = mascaras
-    out["Máscara prestador"] = mascaras_modelo
-    # 🔹 coluna combinada (pedido)
+    out["Máscara prestador (preenchida)"] = mascaras_preenchidas
+    out["Máscara prestador"] = mascaras_modelo  # modelo oficial com 0
     out["Causa. Motivo. Máscara (extra)"] = combos
-    # 🔹 colunas de status
     out["Classificação No-show"] = resultados
     out["Detalhe"] = detalhes
-    # 🔹 nova coluna: Resultado No Show (mapeia 'Máscara correta' -> 'No-show Cliente')
+    # Resultado No Show (considera regra especial também)
     out["Resultado No Show"] = [
-    "No-show Cliente" if r == "Máscara correta" else "No-show Técnico"
-    for r in resultados
+        "No-show Cliente" if r in ("Máscara correta", "No-show Cliente") else "No-show Técnico"
+        for r in resultados
     ]
 
+    # ------------------------------
+    # ALOCAÇÃO DE ATENDENTES (sai no mesmo arquivo)
+    # ------------------------------
+    st.markdown("### Alocação de atendentes (opcional)")
+    qtd_atend = st.number_input("Número de atendentes", min_value=1, max_value=200, value=3, step=1)
+    nomes_raw = st.text_area(
+        "Nomes dos atendentes (um por linha ou separados por vírgula/;)",
+        value="",
+        placeholder="Ex.: Ana\nBruno\nCarla  (ou)  Ana, Bruno, Carla"
+    )
+
+    # Monta lista de nomes (ou genéricos) e ajusta quantidade
+    nomes_list = [n.strip() for n in re.split(r"[,;\n]+", nomes_raw) if n.strip()]
+    if not nomes_list:
+        nomes_list = [f"Atendente {i+1}" for i in range(int(qtd_atend))]
+    else:
+        while len(nomes_list) < int(qtd_atend):
+            nomes_list.append(f"Atendente {len(nomes_list)+1}")
+    n_final = len(nomes_list)
+
+    # Distribuição em blocos iguais (fácil de visualizar)
+    total_linhas = len(out)
+    bloco = math.ceil(total_linhas / n_final) if n_final else total_linhas
+    designados = []
+    for i in range(n_final):
+        designados.extend([nomes_list[i]] * bloco)
+    designados = designados[:total_linhas]
+
+    # >>> Inserir "Atendente designado" ANTES de "Causa detectada"
+    try:
+        pos = out.columns.get_loc("Causa detectada")
+        out.insert(pos, "Atendente designado", designados)
+    except Exception:
+        # fallback: se por algum motivo não achar a coluna, adiciona no final
+        out["Atendente designado"] = designados
+
+    # Feedback visual
+    with st.expander("Resumo por atendente (alocação)"):
+        resumo = (pd.Series(designados).value_counts().rename_axis("Atendente")
+                  .reset_index(name="Qtde registros").sort_values("Atendente"))
+        st.dataframe(resumo, use_container_width=True)
+
+    # Prévia e download (um único arquivo com tudo)
     st.success("Validação concluída.")
     st.dataframe(out, use_container_width=True)
 
-    # Download
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as w:
         out.to_excel(w, index=False, sheet_name="Resultado")
-    st.download_button("Baixar Excel com 'Classificação No-show'", data=buf.getvalue(),
-                       file_name="resultado_no_show.xlsx",
-                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    st.download_button(
+        "Baixar Excel — Pré-análise (com Atendente designado)",
+        data=buf.getvalue(),
+        file_name="resultado_no_show.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
 else:
     st.info("Envie a exportação; selecione a coluna única e (opcionalmente) a coluna especial.")
 
-# =====================================================================
-# MODO 2: Conferência (Dupla checagem) — múltiplas comparações
-# =====================================================================
 
+# ------------------------------------------------------------
+# MÓDULO 2 — CONFERÊNCIA (multi-duplas Robô × Atendente)
+# ------------------------------------------------------------
 st.markdown("---")
-st.header("Conferência (Dupla checagem) — múltiplas comparações")
-
+st.header("Módulo 2 — Conferência (Dupla checagem) — múltiplas comparações")
 st.markdown("""
 Envie o **relatório conferido pelo atendente** (xlsx/csv).  
 Mapeie **duplas de comparação** (coluna do **Robô** × coluna do **Atendente**).
 
 **Status Geral da linha**
-- **OK**: todas as duplas mapeadas estão OK
-- **Pendência (vazio)**: alguma dupla tem valor do atendente vazio
+- **OK**: todas as duplas mapeadas estão OK  
+- **Pendência (vazio)**: alguma dupla tem valor do atendente vazio  
 - **Divergência**: pelo menos uma dupla diverge
 """)
-
-conf_file = st.file_uploader("Relatório conferido (xlsx/csv)", type=["xlsx", "csv"], key="conf-multi")
 
 def read_any_loose(f):
     """Leitura resiliente: tenta detectar cabeçalho 'sujo' e pula 1 linha se necessário."""
@@ -246,7 +278,6 @@ def read_any_loose(f):
             f.seek(0); return pd.read_csv(f)
     try:
         df = pd.read_excel(f, engine="openpyxl")
-        # heurística: se primeiro cabeçalho veio 'Unnamed', tenta pular 1 linha
         if str(df.columns[0]).lower().startswith("unnamed"):
             f.seek(0)
             df = pd.read_excel(f, engine="openpyxl", skiprows=1)
@@ -254,19 +285,19 @@ def read_any_loose(f):
     except Exception:
         f.seek(0); return pd.read_excel(f)
 
-# normalizador: mapeia rótulos comuns; devolve canônico para outros campos
+# normalizador para cliente/técnico e similares
 def normalize_outcome(x: str) -> str:
-    c = canon(x)  # usa a função canon já definida no app
+    c = canon(x)
     if "cliente" in c:
         return "no-show cliente"
     if "tecnico" in c or "técnico" in c:
         return "no-show tecnico"
     if "mascara correta" in c or "máscara correta" in c:
-        # regra de negócio: máscara correta conta como cliente
         return "no-show cliente"
     return c
 
-# controla qtde de duplas (pares) na sessão
+conf_file = st.file_uploader("Relatório conferido (xlsx/csv)", type=["xlsx", "csv"], key="conf-multi")
+
 if "pairs_n" not in st.session_state:
     st.session_state.pairs_n = 3   # 3 duplas por padrão
 
@@ -284,16 +315,14 @@ if conf_file:
     # mapeamento de duplas
     pair_defs = []
     for i in range(st.session_state.pairs_n):
-        st.markdown("---" if i == 0 else "")
         c1, c2 = st.columns(2)
         robo_col = c1.selectbox(f"Robô — coluna #{i+1}", cols, key=f"robot_col_{i}")
         att_col  = c2.selectbox(f"Atendente — coluna #{i+1}", cols, key=f"att_col_{i}")
         pair_defs.append((robo_col, att_col))
 
-    # rótulos amigáveis por dupla (Robô × Atendente)
+    # rótulos amigáveis por dupla
     pair_labels = [f"{rc} × {ac}" for rc, ac in pair_defs]
 
-    # util: nome seguro para aba Excel (<=31 chars; sem caracteres inválidos)
     def safe_sheet_name(name: str) -> str:
         bad = r'[]:*?/\\'
         for ch in bad:
@@ -301,7 +330,7 @@ if conf_file:
         name = name.strip()
         return name[:31] if len(name) > 31 else name
 
-    # computa comparações por linha/dupla
+    # comparações por linha/dupla
     linhas_status_geral = []
     pair_status_cols = {i: [] for i in range(st.session_state.pairs_n)}
     pair_robo_norm_cols = {i: [] for i in range(st.session_state.pairs_n)}
@@ -335,7 +364,7 @@ if conf_file:
         else:
             linhas_status_geral.append("Divergência" if tem_div else "OK")
 
-    # monta dataframe de auditoria
+    # dataframe de auditoria
     dfo = dfr.copy()
     for i in range(st.session_state.pairs_n):
         dfo[f"{pair_labels[i]} — Robô (norm)"] = pair_robo_norm_cols[i]
@@ -343,7 +372,7 @@ if conf_file:
         dfo[f"{pair_labels[i]} — Status"] = pair_status_cols[i]
     dfo["Conferência — Status geral"] = linhas_status_geral
 
-    # métricas gerais (com base no status geral)
+    # métricas gerais
     total = len(dfo)
     ok   = int((dfo["Conferência — Status geral"] == "OK").sum())
     pend = int((dfo["Conferência — Status geral"] == "Pendência (vazio)").sum())
@@ -353,11 +382,11 @@ if conf_file:
     st.subheader("Resumo")
     st.write(f"**Total:** {total}  |  **OK:** {ok}  |  **Divergência:** {div}  |  **Pendência:** {pend}  |  **Acurácia:** {acc:.1f}%")
 
-    # --- KPIs (com explicação) ---
-    desvio_rt    = (div / total * 100.0) if total else 0.0            # Robô divergiu do atendente
-    desvio_att   = (pend / total * 100.0) if total else 0.0           # Pendências do atendente
-    perc_rpa     = (ok / total * 100.0) if total else 0.0             # Casos resolvidos pelo robô (OK)
-    perc_humano  = ((div + pend) / total * 100.0) if total else 0.0   # Precisou intervenção humana
+    # KPIs com explicação
+    desvio_rt    = (div / total * 100.0) if total else 0.0
+    desvio_att   = (pend / total * 100.0) if total else 0.0
+    perc_rpa     = (ok / total * 100.0) if total else 0.0
+    perc_humano  = ((div + pend) / total * 100.0) if total else 0.0
 
     st.subheader("Indicadores")
     k1, k2, k3, k4 = st.columns(4)
@@ -377,7 +406,7 @@ if conf_file:
 """
     )
 
-    # --- Indicadores POR DUPLA ---
+    # Indicadores por dupla
     st.subheader("Indicadores por dupla de comparação")
     st.caption("Cada dupla é nomeada como **Robô × Atendente** usando os nomes de coluna selecionados.")
 
@@ -412,7 +441,7 @@ if conf_file:
 > O **Status geral** da linha é OK apenas se **todas** as duplas mapeadas estiverem OK.
 """)
 
-    # --- Matrizes por dupla ---
+    # Matrizes por dupla
     st.subheader("Matrizes de concordância (por dupla)")
     matrizes = {}
     for i in range(st.session_state.pairs_n):
@@ -427,7 +456,7 @@ if conf_file:
         except Exception:
             st.info(f"Não foi possível montar a matriz para a dupla **{pair_labels[i]}**.")
 
-    # --- Exporta Excel multi-aba ---
+    # Exporta Excel multi-aba
     st.subheader("Prévia da planilha de auditoria")
     st.dataframe(dfo, use_container_width=True)
 
@@ -448,7 +477,6 @@ if conf_file:
         dfo.to_excel(w, index=False, sheet_name="Conferencia")
         indicadores.to_excel(w, index=False, sheet_name="Indicadores")
         df_ind_duplas.to_excel(w, index=False, sheet_name="Indicadores_por_dupla")
-        # uma aba de matriz por dupla com nome seguro
         for i, cm in matrizes.items():
             sheet = safe_sheet_name(f"Matriz_{pair_labels[i]}")
             cm.to_excel(w, sheet_name=sheet)
