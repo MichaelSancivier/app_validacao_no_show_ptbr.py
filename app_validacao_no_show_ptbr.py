@@ -33,6 +33,78 @@ REGRAS_EMBUTIDAS = [
     {"causa":"Agendamento cancelado.","motivo":"Cancelamento a pedido da RT","mascara_modelo":"Acordado novo agendamento com o cliente  0 no dia  00, via  - 0, pelo motivo - 0"},
 ]
 
+# ============================================================
+# (Opcional) Adicionar regras rápidas (runtime) — Opção B
+# ============================================================
+st.markdown("#### (Opcional) Adicionar regras rápidas (runtime)")
+with st.expander("Adicionar novas regras **sem editar** o código"):
+    st.caption("Formato: **uma regra por linha**, separando por ponto e vírgula: `causa ; motivo ; mascara_modelo`")
+    exemplo = "Agendamento cancelado.; Erro de Agendamento – Documento inválido; OS apresentou erro de 0 identificado via 0. Cliente 0 informado em 0."
+    regras_txt = st.text_area(
+        "Cole aqui as regras",
+        value="",
+        placeholder=exemplo,
+        height=140
+    )
+
+    col_apply, col_clear = st.columns([1,1])
+    aplicar = col_apply.button("Aplicar regras rápidas")
+    limpar  = col_clear.button("Limpar caixa")
+
+    if limpar:
+        st.experimental_rerun()
+
+    if aplicar:
+        extras = []
+        erros  = []
+        for ln, linha in enumerate(regras_txt.splitlines(), start=1):
+            linha = linha.strip()
+            if not linha:
+                continue
+            # tenta quebrar em 3 partes: causa ; motivo ; mascara_modelo
+            parts = [p.strip() for p in linha.split(";", 2)]
+            if len(parts) != 3:
+                erros.append(f"Linha {ln}: use 2 ';' (causa ; motivo ; mascara_modelo)")
+                continue
+            causa, motivo, mascara = parts
+            if not causa or not motivo or not mascara:
+                erros.append(f"Linha {ln}: 'causa', 'motivo' e 'mascara_modelo' não podem estar vazios")
+                continue
+            extras.append({"causa": causa, "motivo": motivo, "mascara_modelo": mascara})
+
+        if erros:
+            for e in erros:
+                st.warning(e)
+
+        if extras:
+            # Mescla nas regras embutidas (atualiza motivo existente)
+            # 1) cria um dict por chave canônica para facilitar sobrescrita
+            base_by_key = {}
+            for r in REGRAS_EMBUTIDAS:
+                key = (canon(r["causa"]), canon(r["motivo"]))
+                base_by_key[key] = r
+
+            # 2) aplica extras (sobrescreve se já existir)
+            for r in extras:
+                key = (canon(r["causa"]), canon(r["motivo"]))
+                base_by_key[key] = r
+
+            # 3) reconstrói lista REGRAS_EMBUTIDAS preservando valores originais
+            REGRAS_EMBUTIDAS[:] = list(base_by_key.values())
+
+            # 4) recompila RULES_MAP com as novas máscaras (regex tolerante)
+            RULES_MAP.clear()
+            for r in REGRAS_EMBUTIDAS:
+                key = (canon(r["causa"]), canon(r["motivo"]))
+                RULES_MAP[key] = (
+                    r["motivo"],
+                    template_to_regex_flex(r["mascara_modelo"]),
+                    r["mascara_modelo"]
+                )
+
+            st.success(f"✅ {len(extras)} regra(s) adicionada(s)/atualizada(s). Já estão ativas nesta sessão.")
+            with st.expander("Ver últimas regras aplicadas"):
+                st.write(pd.DataFrame(extras))
 
 # ------------------------------------------------------------
 # UTILITÁRIOS (normalização + regex tolerante)
