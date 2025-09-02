@@ -12,25 +12,98 @@ st.set_page_config(page_title="Validador de No-show — PT-BR", layout="wide")
 st.title("Validador de No-show — PT-BR")
 
 
-# ------------------------------------------------------------
-# REGRAS EMBUTIDAS (15)
-# ------------------------------------------------------------
+# ============================================================
+# Regras embutidas (modelos oficiais de causa/motivo/máscara)
+# ============================================================
 REGRAS_EMBUTIDAS = [
-    {"causa":"Agendamento cancelado.","motivo":"Atendimento Improdutivo – Ponto Fixo","mascara_modelo":"Veículo compareceu para atendimento, porém por 0, não foi possível realizar o serviço."},
-    {"causa":"Agendamento cancelado.","motivo":"Cancelada a Pedido do Cliente","mascara_modelo":"Cliente 0 , contato via 0 em 0 - 0, informou indisponibilidade para o atendimento."},
-    {"causa":"Agendamento cancelado.","motivo":"No-show Cliente – Ponto Fixo/Móvel","mascara_modelo":"Cliente não compareceu para atendimento até às 0."},
-    {"causa":"Agendamento cancelado.","motivo":"Erro de Agendamento – Cliente desconhecia","mascara_modelo":"Em contato com o cliente o mesmo informou que desconhecia o agendamento. Nome: 0 / Data contato: 0 - 0"},
-    {"causa":"Agendamento cancelado.","motivo":"Erro de Agendamento – Endereço incorreto","mascara_modelo":"Erro identificado no agendamento: 0 . Situação:0. Cliente 0 - informado em 0"},
-    {"causa":"Agendamento cancelado.","motivo":"Erro de Agendamento – Falta de informações na O.S.","mascara_modelo":"OS agendada apresentou erro de 0 identificado via 0. Contato com cliente 0 -  em 0."},
-    {"causa":"Agendamento cancelado.","motivo":"Erro de Agendamento – O.S. agendada incorretamente (tipo/motivo/produto)","mascara_modelo":"OS apresentou erro de 0 identificado via 0. Contato com cliente 0 -  em 0 - 0"},
-    {"causa":"Agendamento cancelado.","motivo":"Falta de Equipamento (Material/Principal/Reservado)","mascara_modelo":"OS apresentou erro de 0 identificado via 0. Contato com cliente 0 -  em 0 - 0"},
-    {"causa":"Agendamento cancelado.","motivo":"Instabilidade de Equipamento/Sistema","mascara_modelo":"Atendimento em 0 0 não concluído devido à instabilidade de 0. Registrado teste/reinstalação. ASM 0"},
-    {"causa":"Agendamento cancelado.","motivo":"Ocorrência com Técnico – Não foi possível realizar atendimento","mascara_modelo":"Técnico 0 , em 0 - 0, não realizou o atendimento por motivo de 0"},
-    {"causa":"Agendamento cancelado.","motivo":"Ocorrência com Técnico – Sem tempo hábil","mascara_modelo":"Motivo: 0 . Cliente 0 - informado do reagendamento."},
-    {"causa":"Agendamento cancelado.","motivo":"Perda/Extravio (Não devolução) – Mau uso","mascara_modelo":"OS em 0 - 0 classificada como Perda/Extravio, equipamento - 0 não devolvido. Cliente recusou assinar termo."},
-    {"causa":"Agendamento cancelado.","motivo":"Cronograma de Instalação/Substituição de Placa","mascara_modelo":"Realizado atendimento com substituição de placa. Alteração feita pela OS 0."},
-    {"causa":"Agendamento cancelado.","motivo":"No-show Técnico","mascara_modelo":"Técnico 0 , em 0 - 0, não realizou o atendimento por motivo de 0"},
-    {"causa":"Agendamento cancelado.","motivo":"Cancelamento a pedido da RT","mascara_modelo":"Acordado novo agendamento com o cliente  0 no dia  00, via  - 0, pelo motivo - 0"},
+    {
+        "causa": "Agendamento cancelado.",
+        "motivo": "Atendimento Improdutivo – Ponto Fixo",
+        "mascara_modelo": "Veículo compareceu para atendimento, porém por 0, não foi possível realizar o serviço."
+    },
+    {
+        "causa": "Agendamento cancelado.",
+        "motivo": "Cancelada a Pedido do Cliente",
+        "mascara_modelo": "Cliente 0 , contato via 0 em 0 - 0, informou indisponibilidade para o atendimento."
+    },
+    {
+        "causa": "Agendamento cancelado.",
+        "motivo": "No-show Cliente – Ponto Fixo/Móvel",
+        "mascara_modelo": "Cliente não compareceu para atendimento até às 0."
+    },
+    {
+        "causa": "Agendamento cancelado.",
+        "motivo": "Erro de Agendamento – Cliente desconhecia",
+        "mascara_modelo": "Em contato com o cliente o mesmo informou que desconhecia o agendamento. Nome: 0 / Data contato: 0 - 0"
+    },
+    {
+        "causa": "Agendamento cancelado.",
+        "motivo": "Erro de Agendamento – Endereço incorreto",
+        "mascara_modelo": "Erro identificado no agendamento: 0 . Situação:0. Cliente 0 - informado em 0"
+    },
+    {
+        "causa": "Agendamento cancelado.",
+        "motivo": "Erro de Agendamento – Falta de informações na O.S.",
+        "mascara_modelo": "OS agendada apresentou erro de 0 identificado via 0. Contato com cliente 0 - em 0."
+    },
+    {
+        "causa": "Agendamento cancelado.",
+        "motivo": "Erro de Agendamento – O.S. agendada incorretamente (tipo/motivo/produto)",
+        "mascara_modelo": "OS apresentou erro de 0 identificado via 0. Contato com cliente 0 - em 0 - 0"
+    },
+    {
+        "causa": "Agendamento cancelado.",
+        "motivo": "Falta de Equipamento (Material/Principal/Reservado)",
+        "mascara_modelo": "OS apresentou erro de 0 identificado via 0. Contato com cliente 0 - em 0 - 0"
+    },
+    {
+        "causa": "Agendamento cancelado.",
+        "motivo": "Instabilidade de Equipamento/Sistema",
+        "mascara_modelo": "Atendimento em 0 0 não concluído devido à instabilidade de 0. Registrado teste/reinstalação. ASM 0"
+    },
+    {
+        "causa": "Agendamento cancelado.",
+        "motivo": "Ocorrência com Técnico – Não foi possível realizar atendimento",
+        "mascara_modelo": "Técnico 0 , em 0 - 0, não realizou o atendimento por motivo de 0"
+    },
+    {
+        "causa": "Agendamento cancelado.",
+        "motivo": "Ocorrência com Técnico – Sem tempo hábil",
+        "mascara_modelo": "Motivo: 0 . Cliente 0 - informado do reagendamento."
+    },
+    {
+        "causa": "Agendamento cancelado.",
+        "motivo": "Perda/Extravio (Não devolução) – Mau uso",
+        "mascara_modelo": "OS em 0 - 0 classificada como Perda/Extravio, equipamento - 0 não devolvido. Cliente recusou assinar termo."
+    },
+    {
+        "causa": "Agendamento cancelado.",
+        "motivo": "Cronograma de Instalação/Substituição de Placa",
+        "mascara_modelo": "Realizado atendimento com substituição de placa. Alteração feita pela OS 0."
+    },
+    {
+        "causa": "Agendamento cancelado.",
+        "motivo": "No-show Técnico",
+        "mascara_modelo": "Técnico 0 , em 0 - 0, não realizou o atendimento por motivo de 0"
+    },
+    {
+        "causa": "Agendamento cancelado.",
+        "motivo": "Cancelamento a pedido da RT",
+        "mascara_modelo": "Acordado novo agendamento com o cliente  0 no dia  00, via  - 0, pelo motivo - 0"
+    },
+    # ========================================================
+    # Novas regras adicionadas
+    # ========================================================
+    {
+        "causa": "Agendamento cancelado.",
+        "motivo": "Alteração do tipo de serviço",
+        "mascara_modelo": "Não foi possível realizar o atendimento devido 0 . Cliente 0 foi informado sobre a necessidade de reagendamento."
+    },
+    {
+        "causa": "Agendamento cancelado.",
+        "motivo": "Ocorrência Com Técnico - Técnico Sem Habilidade Para Realizar Serviço",
+        "mascara_modelo": "Não foi possível realizar o atendimento devido 0 . Cliente 0 foi informado sobre a necessidade de reagendamento."
+    }
 ]
 
 
