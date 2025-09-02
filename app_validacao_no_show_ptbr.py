@@ -111,7 +111,7 @@ def read_any(f):
         f.seek(0); return pd.read_excel(f)
 
 # ============================================================
-# (Opcional) Adicionar regras rápidas (runtime)
+# (Opcional) Adicionar regras rápidas (runtime) — SEM aninhar expanders
 # ============================================================
 st.markdown("#### (Opcional) Adicionar regras rápidas (runtime)")
 with st.expander("Adicionar novas regras **sem editar** o código"):
@@ -124,21 +124,21 @@ with st.expander("Adicionar novas regras **sem editar** o código"):
         height=140
     )
 
-    col_apply, col_clear = st.columns([1,1])
+    col_apply, col_clear = st.columns([1, 1])
     aplicar = col_apply.button("Aplicar regras rápidas")
     limpar  = col_clear.button("Limpar caixa")
 
     if limpar:
+        # limpa textarea e recarrega a página
+        st.session_state.pop("ultimas_regras_aplicadas", None)
         st.experimental_rerun()
 
     if aplicar:
-        extras = []
-        erros  = []
+        extras, erros = [], []
         for ln, linha in enumerate(regras_txt.splitlines(), start=1):
             linha = linha.strip()
             if not linha:
                 continue
-            # tenta quebrar em 3 partes: causa ; motivo ; mascara_modelo
             parts = [p.strip() for p in linha.split(";", 2)]
             if len(parts) != 3:
                 erros.append(f"Linha {ln}: use 2 ';' (causa ; motivo ; mascara_modelo)")
@@ -154,22 +154,18 @@ with st.expander("Adicionar novas regras **sem editar** o código"):
                 st.warning(e)
 
         if extras:
-            # Mescla nas regras embutidas (atualiza motivo existente)
-            # 1) cria um dict por chave canônica para facilitar sobrescrita
+            # 1) indexa regras atuais por chave canônica (causa+motivo)
             base_by_key = {}
             for r in REGRAS_EMBUTIDAS:
                 key = (canon(r["causa"]), canon(r["motivo"]))
                 base_by_key[key] = r
-
-            # 2) aplica extras (sobrescreve se já existir)
+            # 2) aplica/sobrescreve extras
             for r in extras:
                 key = (canon(r["causa"]), canon(r["motivo"]))
                 base_by_key[key] = r
-
-            # 3) reconstrói lista REGRAS_EMBUTIDAS preservando valores originais
+            # 3) reconstrói lista
             REGRAS_EMBUTIDAS[:] = list(base_by_key.values())
-
-            # 4) recompila RULES_MAP com as novas máscaras (regex tolerante)
+            # 4) recompila RULES_MAP
             RULES_MAP.clear()
             for r in REGRAS_EMBUTIDAS:
                 key = (canon(r["causa"]), canon(r["motivo"]))
@@ -179,9 +175,15 @@ with st.expander("Adicionar novas regras **sem editar** o código"):
                     r["mascara_modelo"]
                 )
 
+            # guarda para mostrar fora do expander (evita nesting)
+            st.session_state["ultimas_regras_aplicadas"] = extras
             st.success(f"✅ {len(extras)} regra(s) adicionada(s)/atualizada(s). Já estão ativas nesta sessão.")
-            with st.expander("Ver últimas regras aplicadas"):
-                st.write(pd.DataFrame(extras))
+
+# Mostra a última leva de regras aplicadas (fora do expander, para não aninhar)
+if "ultimas_regras_aplicadas" in st.session_state and st.session_state["ultimas_regras_aplicadas"]:
+    st.markdown("#### Últimas regras aplicadas")
+    st.dataframe(pd.DataFrame(st.session_state["ultimas_regras_aplicadas"]), use_container_width=True)
+
 # ============================================================
 # Botão para exportar TODAS as regras atuais (embutidas + rápidas)
 # ============================================================
