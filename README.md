@@ -1,38 +1,39 @@
-# Validador de No-show — PT-BR (resumo)
+# Validador de No-show — PT-BR
 
-App **Streamlit** para:
-- **Módulo 1 (Pré-análise):** validar “Causa. Motivo. Máscara…”, aplicar regra especial **Automático - PORTAL**, e gerar colunas de resultado.
-- **Módulo 2 (Conferência):** comparar **Robô × Atendente** em múltiplas duplas, ver KPIs com explicação, indicadores por dupla e matrizes.
+Aplicação **Streamlit** para validar **Máscaras de No-show** em ordens de serviço.
 
 ---
 
-## Formatos de entrada
-- Aceita **Excel (.xlsx)** e **CSV (.csv)** em ambos os módulos.  
-- O app detecta automaticamente o tipo e, no caso de CSV, tenta identificar o separador.  
-- Se o arquivo tiver cabeçalhos “sujos” (ex.: linha “TABELA …”), o app pula automaticamente ou basta limpar antes de subir.
+## Funcionalidades principais
+- Lê arquivos de entrada em **Excel (.xlsx)** e **CSV (.csv)**.
+- Você escolhe **qual coluna** contém `Causa. Motivo. Máscara...` (preenchida pelo prestador).
+- Compara com as **17 regras embutidas**:
+  - 15 regras oficiais de negócio.
+  - +2 regras novas adicionadas:
+    - **Alteração do tipo de serviço**
+    - **Ocorrência Com Técnico - Técnico Sem Habilidade Para Realizar Serviço**
+- Suporta **inclusão dinâmica de regras rápidas** (na tela do app) ou via **importação de JSON**.
+- Aplica regra especial para **Automático - PORTAL** (classifica direto como *No-show Cliente*).
+- Gera colunas adicionais no resultado:
+  - **Máscara prestador (preenchida)**
+  - **Máscara prestador**
+  - **Causa. Motivo. Máscara**
+  - **Classificação No-show**
+  - **Detalhe**
+  - **Resultado No Show**
+  - **Atendente designado** (pode dividir registros entre atendentes).
 
 ---
 
-## Novidades de Exportação
-
-### Módulo 1 — Pré-análise
-- **Selecionar colunas**: marque **“Exportar todas as colunas”** ou escolha manualmente *quais* colunas vão para o Excel.
-- A ordem padrão mantém **Atendente designado → Causa detectada** (antes das demais colunas geradas).
-- O arquivo baixado é **resultado_no_show.xlsx** com a planilha **Resultado**.
-
-### Módulo 2 — Conferência
-- **Escolher abas (sheets)** para exportar:
-  - `Conferencia` (dados + status por dupla + status geral)
-  - `Indicadores` (KPIs gerais)
-  - `Indicadores_por_dupla`
-  - `Matriz_<Dupla>` (uma por dupla)
-- **Selecionar colunas da aba Conferencia**: exportar todas ou escolher manualmente.
-- O arquivo baixado é **conferencia_no_show.xlsx**.
+## Exportação
+- **Pré-análise**: escolha exportar todas as colunas ou apenas algumas.  
+- **Conferência**: permite exportar múltiplas abas (`Conferencia`, `Indicadores`, `Indicadores_por_dupla`, `Matriz_<Dupla>`).
 
 ---
 
-## Como rodar localmente
+## Rodar localmente
 
 ```bash
 pip install -r requirements.txt
 streamlit run app_validacao_no_show_ptbr.py
+
