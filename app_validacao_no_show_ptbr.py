@@ -182,6 +182,23 @@ def read_any(f):
         return pd.read_excel(f, engine="openpyxl")
     except Exception:
         f.seek(0); return pd.read_excel(f)
+# ------------------------------------------------------------
+# Gatilhos da REGRA ESPECIAL → viram "No-show Cliente"
+# (adicione/remova valores conforme necessidade)
+# ------------------------------------------------------------
+ESPECIAIS_NO_SHOW_CLIENTE = [
+    "Automático - PORTAL",
+    "Michelin",
+    "OUTRO",
+]
+
+def eh_especial_no_show_cliente(valor: str) -> bool:
+    """
+    Retorna True se o texto 'valor' contiver algum gatilho da lista ESPECIAIS_NO_SHOW_CLIENTE.
+    Usa normalização (canon) e 'contains' para maior tolerância.
+    """
+    v = canon(valor)
+    return any(canon(g) in v for g in ESPECIAIS_NO_SHOW_CLIENTE if g.strip())
 
 # ============================================================
 # (Opcional) Adicionar regras rápidas (runtime) — SEM aninhar expanders
@@ -294,23 +311,24 @@ st.header("Módulo 1 — Validador (Pré-análise)")
 st.markdown("""
 Selecione **uma coluna** com o texto completo no formato:
 
-**`Causa. Motivo. Mascara (preenchida pelo prestador)...`**
+**`Causa. Motivo. Máscara (preenchida pelo prestador)...`**
 
-E (opcional) selecione uma **coluna especial**: se o valor for **`Automático - PORTAL`**, a linha será classificada como **No-show Cliente**.
+E (opcional) selecione uma **coluna especial**: se o valor bater em **qualquer gatilho** (ex.: `Automático - PORTAL`, `Michelin`, `OUTRO`), a linha será classificada como **No-show Cliente**.
 """)
 
 file = st.file_uploader("Exportação (xlsx/csv) — coluna única + (opcional) coluna especial", type=["xlsx","csv"])
 
 if file:
     df = read_any(file)
-    col_main = st.selectbox("Coluna principal (Causa. Motivo. Mascara...)", df.columns)
-    col_especial = st.selectbox("Coluna especial (opcional) — valor 'Automático - PORTAL' força No-show Cliente",
-                                ["(Nenhuma)"] + list(df.columns))
+    col_main = st.selectbox("Coluna principal (Causa. Motivo. Máscara...)", df.columns)
+    col_especial = st.selectbox(
+        "Coluna especial (opcional) — gatilhos forçam No-show Cliente",
+        ["(Nenhuma)"] + list(df.columns)
+    )
 
     resultados, detalhes = [], []
     causas, motivos, mascaras_preenchidas = [], [], []
-    combos = []
-    mascaras_modelo = []
+    combos, mascaras_modelo = [], []
 
     for _, row in df.iterrows():
         # Detecta causa/motivo/máscara a partir da coluna principal
@@ -324,16 +342,19 @@ if file:
         # por padrão, modelo vazio; será preenchido se reconhecermos o motivo
         mascara_modelo_val = ""
 
-        # Regra especial: Automático - PORTAL
+        # ---------- REGRA ESPECIAL FLEXÍVEL ----------
         if col_especial != "(Nenhuma)":
             valor_especial = row.get(col_especial, "")
-            if canon(valor_especial) == canon("Automático - PORTAL"):
+            if eh_especial_no_show_cliente(valor_especial):
                 resultados.append("No-show Cliente")
-                detalhes.append("Regra especial aplicada: coluna especial = 'Automático - PORTAL'.")
+                detalhes.append(
+                    f"Regra especial aplicada: coluna especial = '{valor_especial}'. "
+                    f"Gatilhos ativos: {', '.join(ESPECIAIS_NO_SHOW_CLIENTE)}"
+                )
                 mascaras_modelo.append(mascara_modelo_val)
-                continue  # pula validação regex
+                continue  # pula validação por máscara/motivo
 
-        # Fluxo normal: valida máscara pelo motivo detectado
+        # ---------- Fluxo normal: valida pela regra correspondente ----------
         key = (canon(causa), canon(motivo))
         found = RULES_MAP.get(key)
         if not found:
@@ -353,8 +374,8 @@ if file:
             detalhes.append("Não casa com o modelo (mesmo no modo tolerante).")
         mascaras_modelo.append(mascara_modelo_val)
 
+    # ---- Monta saída base
     out = df.copy()
-    # Colunas calculadas
     out["Causa detectada"] = causas
     out["Motivo detectado"] = motivos
     out["Máscara prestador (preenchida)"] = mascaras_preenchidas
@@ -362,7 +383,7 @@ if file:
     out["Causa. Motivo. Máscara (extra)"] = combos
     out["Classificação No-show"] = resultados
     out["Detalhe"] = detalhes
-    # Resultado No Show (considera regra especial também)
+    # Resultado No Show (consolida)
     out["Resultado No Show"] = [
         "No-show Cliente" if r in ("Máscara correta", "No-show Cliente") else "No-show Técnico"
         for r in resultados
@@ -460,7 +481,6 @@ if file:
     )
 else:
     st.info("Envie a exportação; selecione a coluna única e (opcionalmente) a coluna especial.")
-
 
 # ------------------------------------------------------------
 # MÓDULO 2 — CONFERÊNCIA (multi-duplas Robô × Atendente)
