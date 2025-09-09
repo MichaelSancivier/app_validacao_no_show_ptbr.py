@@ -1,179 +1,55 @@
+# -*- coding: utf-8 -*-
+# App Streamlit — Validador No-show (Pré-análise + Conferência sem dupla checagem)
+from __future__ import annotations
+
 import io
 import re
-import math
-import unicodedata
+from datetime import datetime
+
+import numpy as np
 import pandas as pd
 import streamlit as st
 
-# ------------------------------------------------------------
-# CONFIG
-# ------------------------------------------------------------
-st.set_page_config(page_title="Validador de No-show — PT-BR", layout="wide")
-st.title("Validador de No-show — PT-BR")
 
 # ============================================================
-# Regras embutidas (modelos oficiais de causa/motivo/máscara)
-# -> Base normalizada a partir das regras enviadas
+# Util: normalização e regex tolerante para máscaras
 # ============================================================
-REGRAS_EMBUTIDAS = [
-    {
-        "causa": "Agendamento cancelado",
-        "motivo": "Alteração do tipo de serviço  – De assistência para reinstalação",
-        "mascara_modelo": "Não foi possível realizar o atendimento devido 0 . Cliente  foi informado sobre a necessidade de reagendamento."
-    },
-    {
-        "causa": "Agendamento cancelado",
-        "motivo": "Atendimento Improdutivo – Ponto Fixo/Móvel",
-        "mascara_modelo": "Veículo compareceu para atendimento, porém por 0, não foi possível realizar o serviço."
-    },
-    {
-        "causa": "Agendamento cancelado",
-        "motivo": "Cancelada a Pedido do Cliente",
-        "mascara_modelo": "Cliente 0 , contato via  em  - , informou indisponibilidade para o atendimento."
-    },
-    {
-        "causa": "Agendamento cancelado",
-        "motivo": "Cancelada a Pedido do Cliente",
-        "mascara_modelo": "Cliente 0 , contato via  em  - , informou indisponibilidade para o atendimento."
-    },
-    {
-        "causa": "Agendamento cancelado",
-        "motivo": "Cancelamento a pedido da RT",
-        "mascara_modelo": "Não foi possível realizar o atendimento devido 0 . Cliente  o  -  foi informado sobre a necessidade de reagendamento."
-    },
-    {
-        "causa": "Agendamento cancelado",
-        "motivo": "Cronograma de Instalação/Substituição de Placa",
-        "mascara_modelo": "Realizado atendimento com substituição de placa. Alteração feita pela OS 0."
-    },
-    {
-        "causa": "Agendamento cancelado",
-        "motivo": "Erro De Agendamento - Cliente desconhecia o agendamento",
-        "mascara_modelo": "Em contato com o cliente o mesmo informou que desconhecia o agendamento. Nome cliente: 0 / Data contato:  - "
-    },
-    {
-        "causa": "Agendamento cancelado",
-        "motivo": "Erro de Agendamento – Endereço incorreto",
-        "mascara_modelo": "Erro identificado no agendamento: 0 . Situação:. Cliente  - informado em "
-    },
-    {
-        "causa": "Agendamento cancelado",
-        "motivo": "Erro de Agendamento – Falta de informações na O.S.",
-        "mascara_modelo": "OS agendada apresentou erro de 0  e foi identificado através de . Realizado o contato com o cliente  - no dia  - "
-    },
-    {
-        "causa": "Agendamento cancelado",
-        "motivo": "Erro de Agendamento – O.S. agendada incorretamente (tipo/motivo/produto)",
-        "mascara_modelo": "OS agendada apresentou erro de 0  e foi identificado através de . Realizado o contato com o cliente  - no dia  - "
-    },
-    {
-        "causa": "Agendamento cancelado",
-        "motivo": "Erro de roteirização do agendamento - Atendimento móvel",
-        "mascara_modelo": "Não foi possível concluir o atendimento devido 0 . Cliente ás  -  foi informado sobre a necessidade de reagendamento. Especialista  informado ás  - "
-    },
-    {
-        "causa": "Agendamento cancelado",
-        "motivo": "Erro de roteirização do agendamento - Atendimento móvel",
-        "mascara_modelo": "Não foi possível concluir o atendimento devido 0 . Cliente ás  -  foi informado sobre a necessidade de reagendamento. Especialista  informado ás  - "
-    },
-    {
-        "causa": "Agendamento cancelado",
-        "motivo": "Falta De Equipamento - Acessórios Imobilizado",
-        "mascara_modelo": "Atendimento não realizado por falta de  0 . Cliente  Informado em  - "
-    },
-    {
-        "causa": "Agendamento cancelado",
-        "motivo": "Falta De Equipamento - Item Reservado Não Compatível",
-        "mascara_modelo": "Atendimento não realizado por falta de  0 . Cliente  Informado em  - "
-    },
-    {
-        "causa": "Agendamento cancelado",
-        "motivo": "Falta De Equipamento - Material",
-        "mascara_modelo": "Atendimento não realizado por falta de  0 . Cliente  Informado em  - "
-    },
-    {
-        "causa": "Agendamento cancelado",
-        "motivo": "Falta De Equipamento - Principal",
-        "mascara_modelo": "Atendimento não realizado por falta de  0 . Cliente  Informado em  - "
-    },
-    {
-        "causa": "Agendamento cancelado",
-        "motivo": "Instabilidade de Equipamento/Sistema",
-        "mascara_modelo": "Atendimento finalizado em 0  não concluído devido à instabilidade de . Registrado teste/reinstalação em  - . Realizado contato com a central  -  e foi gerada a ASM "
-    },
-    {
-        "causa": "Agendamento cancelado",
-        "motivo": "No-show Cliente – Ponto Fixo/Móvel",
-        "mascara_modelo": "Cliente não compareceu para atendimento até às 0."
-    },
-    {
-        "causa": "Agendamento cancelado",
-        "motivo": "No-show Técnico",
-        "mascara_modelo": "Técnico 0 , em  - , não realizou o atendimento por motivo de "
-    },
-    {
-        "causa": "Agendamento cancelado",
-        "motivo": "Ocorrência com Técnico – Não foi possível realizar atendimento",
-        "mascara_modelo": "Técnico 0 , em  - , não realizou o atendimento por motivo de "
-    },
-    {
-        "causa": "Agendamento cancelado",
-        "motivo": "Ocorrência Com Técnico - Sem Tempo Hábil Para Realizar O Serviço (Atendimento Parcial)",
-        "mascara_modelo": "Não foi possível concluir o atendimento devido 0 . Cliente  às  -  foi informado sobre a necessidade de reagendamento."
-    },
-    {
-        "causa": "Agendamento cancelado",
-        "motivo": "Ocorrência Com Técnico - Sem Tempo Hábil Para Realizar O Serviço (Não iniciado)",
-        "mascara_modelo": "Não foi possível realizar o atendimento devido 0 . Cliente  - informado do reagendamento."
-    },
-    {
-        "causa": "Agendamento cancelado",
-        "motivo": "Ocorrência Com Técnico - Sem Tempo Hábil Para Realizar O Serviço (Não iniciado)",
-        "mascara_modelo": "Não foi possível realizar o atendimento devido 0 . Cliente  - informado do reagendamento."
-    },
-    {
-        "causa": "Agendamento cancelado",
-        "motivo": "Ocorrência Com Técnico - Técnico Sem Habilidade Para Realizar Serviço",
-        "mascara_modelo": "Não foi possível realizar o atendimento devido 0 . Cliente  foi informado sobre a necessidade de reagendamento."
-    },
-    {
-        "causa": "Agendamento cancelado",
-        "motivo": "Perda/Extravio/Falta Do Equipamento/Equipamento Com Defeito",
-        "mascara_modelo": "Não foi possível realizar o atendimento pois 0. Cliente recusou assinar termo."
-    },
-    {
-        "causa": "Agendamento cancelado",
-        "motivo": "Serviço incompatível com a OS aberta",
-        "mascara_modelo": "Não foi possível realizar o atendimento devido 0 . Cliente  às  -  foi informado sobre a necessidade de reagendamento."
-    }
-]
+import unicodedata
 
 
-# ------------------------------------------------------------
-# UTILITÁRIOS (normalização + regex tolerante)
-# ------------------------------------------------------------
-def rm_acc(s: str) -> str:
-    return ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn')
+def _rm_acc(s: str) -> str:
+    return "".join(
+        c for c in unicodedata.normalize("NFD", s) if unicodedata.category(c) != "Mn"
+    )
+
 
 def canon(s: str) -> str:
-    if pd.isna(s):
+    """Normaliza string: minúsculas, sem acentos, espaços normalizados."""
+    if s is None or (isinstance(s, float) and pd.isna(s)):
         return ""
     s = str(s)
     s = s.replace("–", "-").replace("—", "-")
-    s = rm_acc(s).lower()
+    s = _rm_acc(s).lower()
     s = re.sub(r"[.;:\s]+$", "", s)
     s = re.sub(r"\s+", " ", s).strip()
     return s
 
+
 def _flexify_fixed_literal(escaped: str) -> str:
+    """Permite variações leves em pontuação/espaços no texto comparado ao modelo."""
     escaped = escaped.replace(r"\ ", r"\s+")
     escaped = escaped.replace(r"\,", r"[\s,]*")
     escaped = escaped.replace(r"\-", r"[\-\–\—]\s*")
     escaped = escaped.replace(r"\.", r"[\.\s]*")
     return escaped
 
-def template_to_regex_flex(template: str) -> re.Pattern:
-    if pd.isna(template):
+
+def template_to_regex_flex(template: str):
+    """
+    Converte um modelo com '0' (slots) para um regex tolerante.
+    Ex.: 'Cliente 0 , contato em  - ' => aceita variações de espaços/pontuação.
+    """
+    if template is None:
         template = ""
     t = re.sub(r"\s+", " ", str(template)).strip()
     parts = re.split(r"0+", t)
@@ -184,14 +60,158 @@ def template_to_regex_flex(template: str) -> re.Pattern:
     try:
         return re.compile(pattern, flags=re.IGNORECASE | re.DOTALL)
     except re.error:
+        # fallback se algo muito estranho vier no modelo
         return re.compile(r"^\s*" + re.escape(t) + r"\s*$", flags=re.IGNORECASE)
 
-# Mapa pré-compilado das regras
-RULES_MAP = {}
-for r in REGRAS_EMBUTIDAS:
-    key = (canon(r["causa"]), canon(r["motivo"]))
-    RULES_MAP[key] = (r["motivo"], template_to_regex_flex(r["mascara_modelo"]), r["mascara_modelo"])
 
+# ============================================================
+# Regras embutidas (catálogo) + índice (RULES_MAP)
+# ============================================================
+REGRAS_EMBUTIDAS = [
+    {
+        "causa": "Agendamento cancelado.",
+        "motivo": "Alteração do tipo de serviço  – De assistência para reinstalação",
+        "mascara_modelo": "Não foi possível realizar o atendimento devido 0 . Cliente  foi informado sobre a necessidade de reagendamento.",
+    },
+    {
+        "causa": "Agendamento cancelado.",
+        "motivo": "Atendimento Improdutivo – Ponto Fixo/Móvel",
+        "mascara_modelo": "Veículo compareceu para atendimento, porém por 0, não foi possível realizar o serviço.",
+    },
+    {
+        "causa": "Agendamento cancelado.",
+        "motivo": "Cancelada a Pedido do Cliente",
+        "mascara_modelo": "Cliente 0 , contato via  em  - , informou indisponibilidade para o atendimento.",
+    },
+    {
+        "causa": "Agendamento cancelado.",
+        "motivo": "Cancelamento a pedido da RT",
+        "mascara_modelo": "Não foi possível realizar o atendimento devido 0 . Cliente  o  -  foi informado sobre a necessidade de reagendamento.",
+    },
+    {
+        "causa": "Agendamento cancelado.",
+        "motivo": "Cronograma de Instalação/Substituição de Placa",
+        "mascara_modelo": "Realizado atendimento com substituição de placa. Alteração feita pela OS 0.",
+    },
+    {
+        "causa": "Agendamento cancelado.",
+        "motivo": "Erro De Agendamento - Cliente desconhecia o agendamento",
+        "mascara_modelo": "Em contato com o cliente o mesmo informou que desconhecia o agendamento. Nome cliente: 0 / Data contato:  - ",
+    },
+    {
+        "causa": "Agendamento cancelado.",
+        "motivo": "Erro de Agendamento – Endereço incorreto",
+        "mascara_modelo": "Erro identificado no agendamento: 0 . Situação:. Cliente  - informado em ",
+    },
+    {
+        "causa": "Agendamento cancelado.",
+        "motivo": "Erro de Agendamento – Falta de informações na O.S.",
+        "mascara_modelo": "OS agendada apresentou erro de 0  e foi identificado através de . Realizado o contato com o cliente  - no dia  - ",
+    },
+    {
+        "causa": "Agendamento cancelado.",
+        "motivo": "Erro de Agendamento – O.S. agendada incorretamente (tipo/motivo/produto)",
+        "mascara_modelo": "OS agendada apresentou erro de 0  e foi identificado através de . Realizado o contato com o cliente  - no dia  - ",
+    },
+    {
+        "causa": "Agendamento cancelado.",
+        "motivo": "Erro de roteirização do agendamento - Atendimento móvel",
+        "mascara_modelo": "Não foi possível concluir o atendimento devido 0 . Cliente ás  -  foi informado sobre a necessidade de reagendamento. Especialista  informado ás  - ",
+    },
+    {
+        "causa": "Agendamento cancelado.",
+        "motivo": "Falta De Equipamento - Acessórios Imobilizado",
+        "mascara_modelo": "Atendimento não realizado por falta de  0 . Cliente  Informado em  - ",
+    },
+    {
+        "causa": "Agendamento cancelado.",
+        "motivo": "Falta De Equipamento - Item Reservado Não Compatível",
+        "mascara_modelo": "Atendimento não realizado por falta de  0 . Cliente  Informado em  - ",
+    },
+    {
+        "causa": "Agendamento cancelado.",
+        "motivo": "Falta De Equipamento - Material",
+        "mascara_modelo": "Atendimento não realizado por falta de  0 . Cliente  Informado em  - ",
+    },
+    {
+        "causa": "Agendamento cancelado.",
+        "motivo": "Falta De Equipamento - Principal",
+        "mascara_modelo": "Atendimento não realizado por falta de  0 . Cliente  Informado em  - ",
+    },
+    {
+        "causa": "Agendamento cancelado.",
+        "motivo": "Instabilidade de Equipamento/Sistema",
+        "mascara_modelo": "Atendimento finalizado em 0  não concluído devido à instabilidade de . Registrado teste/reinstalação em  - . Realizado contato com a central  -  e foi gerada a ASM ",
+    },
+    {
+        "causa": "Agendamento cancelado.",
+        "motivo": "No-show Cliente – Ponto Fixo/Móvel",
+        "mascara_modelo": "Cliente não compareceu para atendimento até às 0.",
+    },
+    {
+        "causa": "Agendamento cancelado.",
+        "motivo": "No-show Técnico",
+        "mascara_modelo": "Técnico 0 , em  - , não realizou o atendimento por motivo de ",
+    },
+    {
+        "causa": "Agendamento cancelado.",
+        "motivo": "Ocorrência com Técnico – Não foi possível realizar atendimento",
+        "mascara_modelo": "Técnico 0 , em  - , não realizou o atendimento por motivo de ",
+    },
+    {
+        "causa": "Agendamento cancelado.",
+        "motivo": "Ocorrência Com Técnico - Sem Tempo Hábil Para Realizar O Serviço (Atendimento Parcial)",
+        "mascara_modelo": "Não foi possível concluir o atendimento devido 0 . Cliente  às  -  foi informado sobre a necessidade de reagendamento.",
+    },
+    {
+        "causa": "Agendamento cancelado.",
+        "motivo": "Ocorrência Com Técnico - Sem Tempo Hábil Para Realizar O Serviço (Não iniciado)",
+        "mascara_modelo": "Não foi possível realizar o atendimento devido 0 . Cliente  - informado do reagendamento.",
+    },
+    {
+        "causa": "Agendamento cancelado.",
+        "motivo": "Ocorrência Com Técnico - Técnico Sem Habilidade Para Realizar Serviço",
+        "mascara_modelo": "Não foi possível realizar o atendimento devido 0 . Cliente  foi informado sobre a necessidade de reagendamento.",
+    },
+    {
+        "causa": "Agendamento cancelado.",
+        "motivo": "Perda/Extravio/Falta Do Equipamento/Equipamento Com Defeito",
+        "mascara_modelo": "Não foi possível realizar o atendimento pois 0. Cliente recusou assinar termo.",
+    },
+    {
+        "causa": "Agendamento cancelado.",
+        "motivo": "Serviço incompatível com a OS aberta",
+        "mascara_modelo": "Não foi possível realizar o atendimento devido 0 . Cliente  às  -  foi informado sobre a necessidade de reagendamento.",
+    },
+]
+
+ESPECIAIS_NO_SHOW_CLIENTE = ["Automático - PORTAL", "Michelin", "OUTRO"]
+
+
+def eh_especial_no_show_cliente(valor: str) -> bool:
+    v = canon(valor)
+    return any(canon(g) in v for g in ESPECIAIS_NO_SHOW_CLIENTE if g.strip())
+
+
+def _build_rules_map():
+    rules = {}
+    for r in REGRAS_EMBUTIDAS:
+        key = (canon(r["causa"]), canon(r["motivo"]))
+        rules[key] = (r["motivo"], template_to_regex_flex(r["mascara_modelo"]), r["mascara_modelo"])
+    return rules
+
+
+RULES_MAP = _build_rules_map()
+
+
+def recarregar_regras():
+    global RULES_MAP
+    RULES_MAP = _build_rules_map()
+
+
+# ============================================================
+# Parser simples: "Causa. Motivo. Máscara ..."
+# ============================================================
 def detect_motivo_and_mask(full_text: str):
     if not full_text:
         return "", "", ""
@@ -209,6 +229,19 @@ def detect_motivo_and_mask(full_text: str):
             return causa_padrao, motivo_original, mascara
     return "", "", txt
 
+
+# ============================================================
+# Streamlit
+# ============================================================
+st.set_page_config(page_title="Validador de No-show — v1.2.0", layout="wide")
+st.title("Validador de No-show — PT-BR (v1.2.0) — Sem dupla checagem")
+
+st.caption(
+    "Módulo 1: pré-análise com regras embutidas + regra especial. "
+    "Módulo 2: conferência no próprio app (com máscara conferida e validação automática)."
+)
+
+
 def read_any(f):
     if f is None:
         return None
@@ -217,120 +250,15 @@ def read_any(f):
         try:
             return pd.read_csv(f, sep=None, engine="python")
         except Exception:
-            f.seek(0); return pd.read_csv(f)
+            f.seek(0)
+            return pd.read_csv(f)
     try:
         return pd.read_excel(f, engine="openpyxl")
     except Exception:
-        f.seek(0); return pd.read_excel(f)
+        f.seek(0)
+        return pd.read_excel(f)
 
-# ------------------------------------------------------------
-# Gatilhos da REGRA ESPECIAL → viram "No-show Cliente"
-# ------------------------------------------------------------
-ESPECIAIS_NO_SHOW_CLIENTE = [
-    "Automático - PORTAL",
-    "Michelin",
-    "OUTRO",
-]
 
-def eh_especial_no_show_cliente(valor: str) -> bool:
-    v = canon(valor)
-    return any(canon(g) in v for g in ESPECIAIS_NO_SHOW_CLIENTE if g.strip())
-
-# ============================================================
-# (Opcional) Adicionar regras rápidas (runtime)
-# ============================================================
-st.markdown("#### (Opcional) Adicionar regras rápidas (runtime)")
-with st.expander("Adicionar novas regras **sem editar** o código"):
-    st.caption("Formato: **uma regra por linha**, separando por ponto e vírgula: `causa ; motivo ; mascara_modelo`")
-    exemplo = "Agendamento cancelado.; Erro de Agendamento – Documento inválido; OS apresentou erro de 0 identificado via 0. Cliente 0 informado em 0."
-    regras_txt = st.text_area("Cole aqui as regras", value="", placeholder=exemplo, height=140)
-
-    col_apply, col_clear = st.columns([1, 1])
-    aplicar = col_apply.button("Aplicar regras rápidas")
-    limpar  = col_clear.button("Limpar caixa")
-
-    if limpar:
-        st.session_state.pop("ultimas_regras_aplicadas", None)
-        st.experimental_rerun()
-
-    if aplicar:
-        extras, erros = [], []
-        for ln, linha in enumerate(regras_txt.splitlines(), start=1):
-            linha = linha.strip()
-            if not linha:
-                continue
-            parts = [p.strip() for p in linha.split(";", 2)]
-            if len(parts) != 3:
-                erros.append(f"Linha {ln}: use 2 ';' (causa ; motivo ; mascara_modelo)")
-                continue
-            causa, motivo, mascara = parts
-            if not causa or not motivo or not mascara:
-                erros.append(f"Linha {ln}: 'causa', 'motivo' e 'mascara_modelo' não podem estar vazios")
-                continue
-            extras.append({"causa": causa, "motivo": motivo, "mascara_modelo": mascara})
-
-        if erros:
-            for e in erros:
-                st.warning(e)
-
-        if extras:
-            base_by_key = {(canon(r["causa"]), canon(r["motivo"])): r for r in REGRAS_EMBUTIDAS}
-            for r in extras:
-                key = (canon(r["causa"]), canon(r["motivo"]))
-                base_by_key[key] = r
-            REGRAS_EMBUTIDAS[:] = list(base_by_key.values())
-
-            RULES_MAP.clear()
-            for r in REGRAS_EMBUTIDAS:
-                key = (canon(r["causa"]), canon(r["motivo"]))
-                RULES_MAP[key] = (r["motivo"], template_to_regex_flex(r["mascara_modelo"]), r["mascara_modelo"])
-
-            st.session_state["ultimas_regras_aplicadas"] = extras
-            st.success(f"✅ {len(extras)} regra(s) adicionada(s)/atualizada(s). Já estão ativas nesta sessão.")
-
-if "ultimas_regras_aplicadas" in st.session_state and st.session_state["ultimas_regras_aplicadas"]:
-    st.markdown("#### Últimas regras aplicadas")
-    st.dataframe(pd.DataFrame(st.session_state["ultimas_regras_aplicadas"]), use_container_width=True)
-
-# ============================================================
-# Exportar regras (JSON)
-# ============================================================
-import json
-from datetime import datetime
-
-st.markdown("#### Exportar regras (JSON)")
-
-def _sort_key(r):
-    return (str(r.get("causa", "")).lower(), str(r.get("motivo", "")).lower())
-
-regras_atuais = sorted(REGRAS_EMBUTIDAS, key=_sort_key)
-json_str = json.dumps(regras_atuais, ensure_ascii=False, indent=2)
-fname = f"regras_no_show_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-
-st.download_button(
-    label="📥 Baixar regras atuais (JSON)",
-    data=json_str.encode("utf-8"),
-    file_name=fname,
-    mime="application/json",
-    help="Exporta todas as regras ativas neste momento (inclui as adicionadas em runtime)."
-)
-
-with st.expander("Pré-visualizar regras (tabela)"):
-    st.dataframe(pd.DataFrame(regras_atuais), use_container_width=True)
-
-# ------------------------------------------------------------
-# MÓDULO 1 — PRÉ-ANÁLISE (VALIDADOR)
-# ------------------------------------------------------------
-st.header("Módulo 1 — Validador (Pré-análise)")
-st.markdown("""
-Selecione **uma coluna** com o texto completo no formato:
-
-**`Causa. Motivo. Máscara (preenchida pelo prestador)...`**
-
-E (opcional) selecione uma **coluna especial**: se o valor bater em **qualquer gatilho** (ex.: `Automático - PORTAL`, `Michelin`, `OUTRO`), a linha será classificada como **No-show Cliente**.
-""")
-
-# Helper p/ 4 categorias
 def categoria_por_motivo(motivo: str) -> str:
     m = canon(motivo)
     if not m:
@@ -341,14 +269,73 @@ def categoria_por_motivo(motivo: str) -> str:
         return "Falta de equipamentos"
     return ""
 
-file = st.file_uploader("Exportação (xlsx/csv) — coluna única + (opcional) coluna especial", type=["xlsx","csv"])
+
+# ============================================================
+# MÓDULO 1 — Pré-análise
+# ============================================================
+st.header("Módulo 1 — Validador (Pré-análise)")
+
+file = st.file_uploader(
+    "Exportação (xlsx/csv) — coluna principal com 'Causa. Motivo. Máscara ...' e, opcionalmente, uma coluna especial",
+    type=["xlsx", "csv"],
+    help="A coluna especial é usada para a 'regra especial' (ex.: Automático - PORTAL, Michelin, OUTRO).",
+)
+
+out = None
+
+with st.expander("Adicionar regras rápidas (runtime)", expanded=False):
+    st.caption("Formato: `causa ; motivo ; mascara_modelo` — uma regra por linha.")
+    exemplo = "Agendamento cancelado.; Erro de Agendamento – Documento inválido; OS apresentou erro de 0 identificado via 0. Cliente 0 informado em 0."
+    regras_txt = st.text_area("Cole aqui as regras", value="", placeholder=exemplo, height=120)
+    c1, c2 = st.columns(2)
+    aplicar = c1.button("Aplicar regras")
+    limpar = c2.button("Limpar")
+    if limpar:
+        st.session_state.pop("ultimas_regras_aplicadas", None)
+        st.experimental_rerun()
+    if aplicar:
+        erros = []
+        for ln, linha in enumerate(regras_txt.splitlines(), start=1):
+            linha = linha.strip()
+            if not linha:
+                continue
+            parts = [p.strip() for p in linha.split(";", 2)]
+            if len(parts) != 3:
+                erros.append(f"Linha {ln}: use 2 ';' (causa ; motivo ; mascara_modelo)")
+                continue
+            causa, motivo, mascara = parts
+            if not causa or not motivo or not mascara:
+                erros.append(f"Linha {ln}: campos vazios")
+                continue
+            REGRAS_EMBUTIDAS.append({"causa": causa, "motivo": motivo, "mascara_modelo": mascara})
+        if erros:
+            for e in erros:
+                st.warning(e)
+        else:
+            recarregar_regras()
+            st.success("✅ Regras aplicadas e ativas nesta sessão.")
 
 if file:
     df = read_any(file)
-    col_main = st.selectbox("Coluna principal (Causa. Motivo. Máscara...)", df.columns)
+
+    col_main = st.selectbox(
+        "Coluna principal (Causa. Motivo. Máscara ...)",
+        df.columns,
+        help="Texto completo enviado pelo prestador: 'Causa. Motivo. Máscara ...'",
+    )
     col_especial = st.selectbox(
-        "Coluna especial (opcional) — gatilhos forçam No-show Cliente",
-        ["(Nenhuma)"] + list(df.columns)
+        "Coluna especial (opcional) — gatilhos: Automático - PORTAL / Michelin / OUTRO",
+        ["(Nenhuma)"] + list(df.columns),
+        help="Se esta coluna contiver qualquer um dos gatilhos, a linha vira 'No-show Cliente' por regra especial.",
+    )
+
+    # Alocação de atendentes
+    st.markdown("#### Alocação de atendentes (opcional)")
+    qtd = st.number_input("Número de atendentes", 1, 200, 3, help="Usado para distribuir a fila se você não passar uma coluna com os nomes.")
+    nomes_raw = st.text_area(
+        "Nomes (1 por linha ou separados por , ; )",
+        value="",
+        help="Se deixar vazio, o app gera nomes 'Atendente 1', 'Atendente 2' ...",
     )
 
     resultados, detalhes = [], []
@@ -364,7 +351,6 @@ if file:
         combos.append(" ".join(partes))
 
         mascara_modelo_val = ""
-
         if col_especial != "(Nenhuma)":
             valor_especial = row.get(col_especial, "")
             if eh_especial_no_show_cliente(valor_especial):
@@ -392,10 +378,16 @@ if file:
             detalhes.append("")
         else:
             resultados.append("No-show Técnico")
-            detalhes.append("Não casa com o modelo (mesmo no modo tolerante).")
+            detalhes.append("Não casa com o modelo (modo tolerante).")
         mascaras_modelo.append(mascara_modelo_val)
 
     out = df.copy()
+    # preserva O.S. se existir
+    if "O.S." not in out.columns and "OS" in out.columns:
+        out = out.rename(columns={"OS": "O.S."})
+    if "O.S." not in out.columns:
+        out["O.S."] = ""
+
     out["Causa detectada"] = causas
     out["Motivo detectado"] = motivos
     out["Máscara prestador (preenchida)"] = mascaras_preenchidas
@@ -404,7 +396,7 @@ if file:
     out["Classificação No-show"] = resultados
     out["Detalhe"] = detalhes
 
-    # Resultado No Show (4 categorias)
+    # Resultado No Show derivado
     resultado_no_show = []
     for r_cls, mot in zip(resultados, motivos):
         cat = categoria_por_motivo(mot)
@@ -416,135 +408,185 @@ if file:
             resultado_no_show.append("No-show Técnico")
     out["Resultado No Show"] = resultado_no_show
 
-    # Alocação de atendentes
-    st.markdown("### Alocação de atendentes (opcional)")
-    qtd_atend = st.number_input("Número de atendentes", min_value=1, max_value=200, value=3, step=1)
-    nomes_raw = st.text_area(
-        "Nomes dos atendentes (um por linha ou separados por vírgula/;)",
-        value="",
-        placeholder="Ex.: Ana\nBruno\nCarla  (ou)  Ana, Bruno, Carla"
-    )
+    # Distribuição de atendentes (se não existir coluna pronta no arquivo)
+    if "Atendente designado" not in out.columns:
+        import re as _re
 
-    nomes_list = [n.strip() for n in re.split(r"[,;\n]+", nomes_raw) if n.strip()]
-    if not nomes_list:
-        nomes_list = [f"Atendente {i+1}" for i in range(int(qtd_atend))]
-    else:
-        while len(nomes_list) < int(qtd_atend):
-            nomes_list.append(f"Atendente {len(nomes_list)+1}")
-    n_final = len(nomes_list)
+        nomes = [n.strip() for n in _re.split(r"[,;\n]+", nomes_raw) if n.strip()]
+        if not nomes:
+            nomes = [f"Atendente {i+1}" for i in range(int(qtd))]
+        else:
+            while len(nomes) < int(qtd):
+                nomes.append(f"Atendente {len(nomes)+1}")
+        bloco = int(np.ceil(len(out) / len(nomes)))
+        out.insert(0, "Atendente designado", (nomes * bloco)[: len(out)])
 
-    total_linhas = len(out)
-    bloco = math.ceil(total_linhas / n_final) if n_final else total_linhas
-    designados = (nomes_list * bloco)[:total_linhas]
+    st.success("Pré-análise concluída.")
+    st.dataframe(out, use_container_width=True)
 
-    try:
-        pos = out.columns.get_loc("Causa detectada")
-        out.insert(pos, "Atendente designado", designados)
-    except Exception:
-        out["Atendente designado"] = designados
-
-    # Exportação (Pré-análise)
-    st.markdown("### Exportação — seleção de colunas")
-    export_all_pre = st.checkbox(
-        "Exportar **todas** as colunas (originais + geradas)",
-        value=True,
-        help="Desmarque para escolher manualmente quais colunas vão para o Excel."
-    )
-
-    geradas_order = [
-        "Atendente designado",
-        "Causa detectada",
-        "Motivo detectado",
-        "Máscara prestador (preenchida)",
-        "Máscara prestador",
-        "Causa. Motivo. Máscara (extra)",
-        "Classificação No-show",
-        "Detalhe",
-        "Resultado No Show",
-    ]
-    originais = [c for c in df.columns if c in out.columns]
-    geradas   = [c for c in geradas_order if c in out.columns]
-    todas_cols_pre = originais + geradas
-
-    if export_all_pre:
-        cols_export_pre = todas_cols_pre
-    else:
-        st.caption("Escolha as colunas que irão para o arquivo (ordem respeitada):")
-        default_pre = [c for c in ["O.S.", "MOTIVO CANCELAMENTO", "Atendente designado",
-                                   "Causa detectada", "Motivo detectado",
-                                   "Classificação No-show", "Resultado No Show"] if c in todas_cols_pre]
-        cols_export_pre = st.multiselect("Colunas para exportar", options=todas_cols_pre, default=default_pre)
-        if not cols_export_pre:
-            st.warning("Nenhuma coluna selecionada. Exportarei todas as colunas.")
-            cols_export_pre = todas_cols_pre
-
-    st.success("Validação concluída.")
-    st.dataframe(out[cols_export_pre], use_container_width=True)
-
-    buf = io.BytesIO()
-    with pd.ExcelWriter(buf, engine="openpyxl") as w:
-        out[cols_export_pre].to_excel(w, index=False, sheet_name="Resultado")
+    # Exportar planilha da pré-análise
+    buf_pre = io.BytesIO()
+    with pd.ExcelWriter(buf_pre, engine="openpyxl") as w:
+        out.to_excel(w, index=False, sheet_name="Resultado")
     st.download_button(
-        "Baixar Excel — Pré-análise (com seleção de colunas)",
-        data=buf.getvalue(),
+        "⬇️ Baixar Excel — Pré-análise",
+        data=buf_pre.getvalue(),
         file_name="resultado_no_show.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
-else:
-    st.info("Envie a exportação; selecione a coluna única e (opcionalmente) a coluna especial.")
 
-# ------------------------------------------------------------
-# MÓDULO 2 — CONFERÊNCIA (multi-duplas Robô × Atendente)
-# (ÚNICO BLOCO — evita DuplicateWidgetID)
-# ------------------------------------------------------------
+# ============================================================
+# MÓDULO 2 — Conferência (sem dupla checagem)
+# ============================================================
 st.markdown("---")
-st.markdown("---")
-st.header("Módulo 2 — Conferência dos atendentes")
+st.header("Módulo 2 — Conferência (sem dupla checagem)")
 
-if 'out' in locals():
+if "out" in locals() and out is not None:
     st.markdown("### Conferência por atendente")
-    nome_atendente = st.selectbox("Selecione seu nome", options=sorted(out["Atendente designado"].unique()))
-    df_atendente = out[out["Atendente designado"] == nome_atendente].copy()
 
+    nome_atendente = st.selectbox(
+        "Selecione seu nome",
+        options=sorted(out["Atendente designado"].astype(str).unique()),
+        help="Selecione o atendente para carregar apenas os registros designados.",
+    )
+    df_atendente = out[out["Atendente designado"].astype(str) == str(nome_atendente)].copy()
     st.markdown(f"**Total de registros para {nome_atendente}:** {len(df_atendente)}")
 
-    # Campos de conferência
-    df_atendente["Máscara conferida"] = ""
-    df_atendente["Classificação ajustada"] = ""
-    df_atendente["Status da conferência"] = ""
-    df_atendente["Observações"] = ""
+    # Garante colunas de conferência
+    for col in [
+        "Máscara conferida",
+        "Classificação ajustada",
+        "Status da conferência",
+        "Observações",
+        "Validação automática (conferida)",
+        "Detalhe (app)",
+    ]:
+        if col not in df_atendente.columns:
+            df_atendente[col] = ""
 
-    classificacoes = ["No-show Cliente", "No-show Técnico", "Erro Agendamento", "Falta de equipamentos", "Correta"]
-    status_opcoes = ["✅ App acertou", "❌ App errou, atendente corrigiu", "⚠️ Atendente errou", "⏳ Pendente"]
+    classificacoes = [
+        "No-show Cliente",
+        "No-show Técnico",
+        "Erro Agendamento",
+        "Falta de equipamentos",
+        "Correta",
+    ]
+    status_opcoes = [
+        "✅ App acertou",
+        "❌ App errou, atendente corrigiu",
+        "⚠️ Atendente errou",
+        "⏳ Pendente",
+    ]
 
+    # ===== edição linha a linha =====
     for i, row in df_atendente.iterrows():
         st.markdown("---")
         st.markdown(f"**O.S.:** {row.get('O.S.', '')}")
         st.markdown(f"**Texto original:** {row.get('Causa. Motivo. Máscara (extra)', '')}")
         st.markdown(f"**Classificação pré-análise:** {row.get('Classificação No-show', '')}")
-        st.markdown(f"**Resultado No Show:** {row.get('Resultado No Show', '')}")
-        st.markdown(f"**Máscara modelo:** {row.get('Máscara prestador', '')}")
+        st.markdown(f"**Resultado No Show (app):** {row.get('Resultado No Show', '')}")
 
-        df_atendente.at[i, "Máscara conferida"] = st.text_input(f"Máscara conferida (linha {i})", value="", key=f"mask_{i}")
-        df_atendente.at[i, "Classificação ajustada"] = st.selectbox(f"Classificação ajustada (linha {i})", options=classificacoes, key=f"class_{i}")
-        df_atendente.at[i, "Status da conferência"] = st.selectbox(f"Status da conferência (linha {i})", options=status_opcoes, key=f"status_{i}")
-        df_atendente.at[i, "Observações"] = st.text_area(f"Observações (linha {i})", value="", key=f"obs_{i}")
+        # --- NOVO: mostrar Detalhe quando houve regra especial
+        detalhe_app = str(row.get("Detalhe", "")).strip()
+        df_atendente.at[i, "Detalhe (app)"] = detalhe_app  # exporta
+        if detalhe_app:
+            if "regra especial aplicada" in detalhe_app.lower():
+                st.warning(
+                    f"**Detalhe (regra especial):**\n\n{detalhe_app}",
+                    icon="⚠️",
+                )
+            else:
+                st.info(f"**Detalhe do app:** {detalhe_app}")
 
+        # Modelo oficial (gerado no Módulo 1)
+        modelo_oficial = str(row.get("Máscara prestador", "")).strip()
+        st.markdown(f"**Máscara modelo (oficial):** `{modelo_oficial}`")
+
+        # --- Máscara conferida (selectbox + opção de texto livre)
+        opcoes_mask = ([modelo_oficial] if modelo_oficial else []) + ["(Outro texto)"]
+        escolha = st.selectbox(
+            f"Máscara conferida — escolha (linha {i})",
+            options=opcoes_mask,
+            key=f"mask_sel_{i}",
+            help=(
+                "Escolha a máscara **oficial** gerada pelo app OU selecione **'(Outro texto)'** para digitar uma máscara "
+                "diferente conforme sua verificação no sistema. "
+                "Se houver **regra especial**, leia o 'Detalhe' acima para entender o motivo do No-show."
+            ),
+        )
+
+        if escolha == "(Outro texto)":
+            mask_conf = st.text_area(
+                f"Digite a máscara conferida (linha {i})",
+                value=str(row.get("Máscara conferida", "")),
+                key=f"mask_txt_{i}",
+                help="Se escolheu '(Outro texto)', digite aqui a máscara exata que será registrada na O.S.",
+            )
+        else:
+            mask_conf = escolha  # usa o modelo oficial
+
+        # --- Validação automática da MÁSCARA CONFERIDA
+        causa = row.get("Causa detectada", "")
+        motivo = row.get("Motivo detectado", "")
+        key = (canon(causa), canon(motivo))
+        found = RULES_MAP.get(key)
+        if found:
+            _, regex, _ = found
+            mask_norm = re.sub(r"\s+", " ", str(mask_conf)).strip()
+            validacao = "✅ Máscara correta" if regex.fullmatch(mask_norm) else "❌ Máscara incorreta"
+        else:
+            validacao = "⚠️ Motivo não reconhecido"
+
+        st.caption(f"**Validação automática (conferida):** {validacao}")
+
+        # Atualiza DF com edição
+        df_atendente.at[i, "Máscara conferida"] = mask_conf
+        df_atendente.at[i, "Validação automática (conferida)"] = validacao
+
+        # Classificação ajustada
+        idx_default = (
+            classificacoes.index(row.get("Resultado No Show", ""))
+            if row.get("Resultado No Show", "") in classificacoes
+            else 0
+        )
+        df_atendente.at[i, "Classificação ajustada"] = st.selectbox(
+            f"Classificação ajustada (linha {i})",
+            options=classificacoes,
+            index=idx_default,
+            key=f"class_{i}",
+            help="Ajuste a classificação final conforme a conferência no sistema (cliente, técnico, erro de agendamento, etc.).",
+        )
+
+        # Status da conferência
+        df_atendente.at[i, "Status da conferência"] = st.selectbox(
+            f"Status da conferência (linha {i})",
+            options=status_opcoes,
+            key=f"status_{i}",
+            help="Registre o desfecho: se o app acertou, se você corrigiu, se houve erro do atendente ou mantenha pendente.",
+        )
+
+        # Observações
+        df_atendente.at[i, "Observações"] = st.text_area(
+            f"Observações (linha {i})",
+            value=str(row.get("Observações", "")),
+            key=f"obs_{i}",
+            help="Use para observações complementares (evidências, contato, RT, etc.).",
+        )
+
+    # ===== tabela final + export =====
     st.markdown("### Tabela final da conferência")
     st.dataframe(df_atendente, use_container_width=True)
 
-    # Exportação
     buf_conf = io.BytesIO()
     with pd.ExcelWriter(buf_conf, engine="openpyxl") as w:
         df_atendente.to_excel(w, index=False, sheet_name="Conferencia")
 
     st.download_button(
-        "Baixar Excel — Conferência do atendente",
+        "⬇️ Baixar Excel — Conferência do atendente",
         data=buf_conf.getvalue(),
         file_name=f"conferencia_{nome_atendente}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        help="Exporta a conferência do atendente com a máscara conferida e a validação automática.",
     )
 else:
-    st.info("Realize a pré-análise no Módulo 1 para habilitar a conferência.")
-
-
+    st.info("Realize a **Pré-análise** no Módulo 1 para habilitar a Conferência.")
