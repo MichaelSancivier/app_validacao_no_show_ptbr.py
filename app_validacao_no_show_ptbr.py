@@ -461,7 +461,7 @@ with st.expander("Módulo 2 — Conferência (Análise)", expanded=True):
 
                     st.session_state["out_df"] = out
                     st.success("✅ Conferência limpa para todas as O.S.")
-                    st.experimental_rerun()
+                    st.rerun()
         # ==============================================
 
         st.markdown("### Conferência por atendente")
