@@ -21,6 +21,8 @@ from backend.repo_users import list_users, create_user, set_password, set_active
 # ------------------------------------------------------------
 # Boot: banco + SID + login
 # ------------------------------------------------------------
+st.set_page_config(page_title="Validador de No-show — v1.2.1", layout="wide")
+
 init_db()                 # cria tabelas se não existirem
 sticky_sid_bootstrap()    # fixa/restaura ?sid= e estabiliza a sessão
 authenticator, ok, username, name, role = login()
@@ -32,6 +34,12 @@ with st.sidebar:
     if st.button("Sair"):
         authenticator.logout()
         st.stop()
+
+st.title("Validador de No-show — PT-BR (v1.2.1)")
+st.caption(
+    "Módulo 1: pré-análise com regras embutidas + regra especial. "
+    "Módulo 2: conferência no app (máscara conferida com validação automática)."
+)
 
 # ============================================================
 # Utils de normalização e regex tolerante
@@ -139,15 +147,8 @@ def detect_motivo_and_mask(full_text: str):
     return "", "", txt
 
 # ============================================================
-# Streamlit (UI)
+# Helpers
 # ============================================================
-st.set_page_config(page_title="Validador de No-show — v1.2.1", layout="wide")
-st.title("Validador de No-show — PT-BR")
-st.caption(
-    "Módulo 1: pré-análise com regras embutidas + regra especial. "
-    "Módulo 2: conferência no app (máscara conferida com validação automática)."
-)
-
 def read_any(f):
     if f is None:
         return None
@@ -175,440 +176,536 @@ def categoria_por_motivo(motivo: str) -> str:
     return ""
 
 # ============================================================
-# MÓDULO 1 — Pré-análise (somente ADMIN) — com expander
+# MÓDULO 1 — Pré-análise (somente ADMIN)
 # ============================================================
-with st.expander("Módulo 1 — Validador (Pré-análise)", expanded=(role == "admin")):
+st.header("Módulo 1 — Validador (Pré-análise)")
 
-    if role != "admin":
-        st.info("Pré-análise disponível apenas para **Admin**. Vá para o **Módulo 2 — Conferência**.")
-        out = None
-    else:
-        file = st.file_uploader(
-            "Exportação (xlsx/csv) — coluna principal com 'Causa. Motivo. Máscara ...' e, opcionalmente, uma coluna especial",
-            type=["xlsx", "csv"],
-            help="A coluna especial é usada para a 'regra especial' (ex.: Automático - PORTAL, Michelin, OUTRO).",
+if role != "admin":
+    st.info("Pré-análise disponível apenas para **Admin**. Vá para o **Módulo 2 — Conferência**.")
+    out = None
+else:
+    file = st.file_uploader(
+        "Exportação (xlsx/csv) — coluna principal com 'Causa. Motivo. Máscara ...' e, opcionalmente, uma coluna especial",
+        type=["xlsx", "csv"],
+        help="A coluna especial é usada para a 'regra especial' (ex.: Automático - PORTAL, Michelin, OUTRO).",
+    )
+
+    out = None
+
+    with st.expander("➕ Adicionar regras rápidas (runtime)", expanded=False):
+        st.caption("Formato: `causa ; motivo ; mascara_modelo` — uma regra por linha.")
+        exemplo = "Agendamento cancelado.; Erro de Agendamento – Documento inválido; OS apresentou erro de 0 identificado via 0. Cliente 0 informado em 0."
+        regras_txt = st.text_area("Cole aqui as regras", value="", placeholder=exemplo, height=120)
+        c1, c2 = st.columns(2)
+        aplicar = c1.button("Aplicar regras")
+        limpar = c2.button("Limpar texto")
+        if limpar:
+            st.session_state.pop("ultimas_regras_aplicadas", None)
+            st.rerun()
+        if aplicar:
+            erros = []
+            for ln, linha in enumerate(regras_txt.splitlines(), start=1):
+                linha = linha.strip()
+                if not linha:
+                    continue
+                parts = [p.strip() for p in linha.split(";", 2)]
+                if len(parts) != 3:
+                    erros.append(f"Linha {ln}: use 2 ';' (causa ; motivo ; mascara_modelo)")
+                    continue
+                causa, motivo, mascara = parts
+                if not causa or not motivo or not mascara:
+                    erros.append(f"Linha {ln}: campos vazios")
+                    continue
+                REGRAS_EMBUTIDAS.append({"causa": causa, "motivo": motivo, "mascara_modelo": mascara})
+            if erros:
+                for e in erros:
+                    st.warning(e)
+            else:
+                recarregar_regras()
+                st.success("✅ Regras aplicadas e ativas nesta sessão.")
+
+    if file:
+        df = read_any(file)
+
+        col_main = st.selectbox(
+            "Coluna principal (Causa. Motivo. Máscara ...)",
+            df.columns,
+            help="Texto completo enviado pelo prestador: 'Causa. Motivo. Máscara ...'",
+        )
+        col_especial = st.selectbox(
+            "Coluna especial (opcional) — gatilhos: Automático - PORTAL / Michelin / OUTRO",
+            ["(Nenhuma)"] + list(df.columns),
+            help="Se esta coluna contiver qualquer um dos gatilhos, a linha vira 'No-show Cliente' por regra especial.",
         )
 
-        out = None
+        # --- cálculo dos resultados por linha ---
+        resultados, detalhes = [], []
+        causas, motivos, mascaras_preenchidas = [], [], []
+        combos, mascaras_modelo = [], []
 
-        with st.expander("Adicionar regras rápidas (runtime)", expanded=False):
-            st.caption("Formato: `causa ; motivo ; mascara_modelo` — uma regra por linha.")
-            exemplo = "Agendamento cancelado.; Erro de Agendamento – Documento inválido; OS apresentou erro de 0 identificado via 0. Cliente 0 informado em 0."
-            regras_txt = st.text_area("Cole aqui as regras", value="", placeholder=exemplo, height=120)
-            c1, c2 = st.columns(2)
-            aplicar = c1.button("Aplicar regras")
-            limpar = c2.button("Limpar")
-            if limpar:
-                st.session_state.pop("ultimas_regras_aplicadas", None)
-                st.experimental_rerun()
-            if aplicar:
-                erros = []
-                for ln, linha in enumerate(regras_txt.splitlines(), start=1):
-                    linha = linha.strip()
-                    if not linha:
-                        continue
-                    parts = [p.strip() for p in linha.split(";", 2)]
-                    if len(parts) != 3:
-                        erros.append(f"Linha {ln}: use 2 ';' (causa ; motivo ; mascara_modelo)")
-                        continue
-                    causa, motivo, mascara = parts
-                    if not causa or not motivo or not mascara:
-                        erros.append(f"Linha {ln}: campos vazios")
-                        continue
-                    REGRAS_EMBUTIDAS.append({"causa": causa, "motivo": motivo, "mascara_modelo": mascara})
-                if erros:
-                    for e in erros:
-                        st.warning(e)
-                else:
-                    recarregar_regras()
-                    st.success("✅ Regras aplicadas e ativas nesta sessão.")
+        for _, row in df.iterrows():
+            causa, motivo, mascara = detect_motivo_and_mask(row.get(col_main, ""))
+            causas.append(causa)
+            motivos.append(motivo)
+            mascaras_preenchidas.append(mascara)
+            partes = [p for p in [str(causa).strip(), str(motivo).strip(), str(mascara).strip()] if p]
+            combos.append(" ".join(partes))
 
-        if file:
-            df = read_any(file)
-
-            col_main = st.selectbox(
-                "Coluna principal (Causa. Motivo. Máscara ...)",
-                df.columns,
-                help="Texto completo enviado pelo prestador: 'Causa. Motivo. Máscara ...'",
-            )
-            col_especial = st.selectbox(
-                "Coluna especial (opcional) — gatilhos: Automático - PORTAL / Michelin / OUTRO",
-                ["(Nenhuma)"] + list(df.columns),
-                help="Se esta coluna contiver qualquer um dos gatilhos, a linha vira 'No-show Cliente' por regra especial.",
-            )
-
-            # --- cálculo dos resultados por linha ---
-            resultados, detalhes = [], []
-            causas, motivos, mascaras_preenchidas = [], [], []
-            combos, mascaras_modelo = [], []
-
-            for _, row in df.iterrows():
-                causa, motivo, mascara = detect_motivo_and_mask(row.get(col_main, ""))
-                causas.append(causa)
-                motivos.append(motivo)
-                mascaras_preenchidas.append(mascara)
-                partes = [p for p in [str(causa).strip(), str(motivo).strip(), str(mascara).strip()] if p]
-                combos.append(" ".join(partes))
-
-                mascara_modelo_val = ""
-                if col_especial != "(Nenhuma)":
-                    valor_especial = row.get(col_especial, "")
-                    if eh_especial_no_show_cliente(valor_especial):
-                        resultados.append("No-show Cliente")
-                        detalhes.append(
-                            f"Regra especial aplicada: coluna especial = '{valor_especial}'. "
-                            f"Gatilhos ativos: {', '.join(ESPECIAIS_NO_SHOW_CLIENTE)}"
-                        )
-                        mascaras_modelo.append(mascara_modelo_val)
-                        continue
-
-                key = (canon(causa), canon(motivo))
-                found = RULES_MAP.get(key)
-                if not found:
-                    resultados.append("No-show Técnico")
-                    detalhes.append("Motivo não reconhecido nas regras embutidas.")
+            mascara_modelo_val = ""
+            if col_especial != "(Nenhuma)":
+                valor_especial = row.get(col_especial, "")
+                if eh_especial_no_show_cliente(valor_especial):
+                    resultados.append("No-show Cliente")
+                    detalhes.append(
+                        f"Regra especial aplicada: coluna especial = '{valor_especial}'. "
+                        f"Gatilhos ativos: {', '.join(ESPECIAIS_NO_SHOW_CLIENTE)}"
+                    )
                     mascaras_modelo.append(mascara_modelo_val)
                     continue
 
-                _motivo_oficial, regex, modelo = found
-                mascara_modelo_val = modelo or ""
-                mascara_norm = re.sub(r"\s+", " ", str(mascara)).strip()
-                if regex.fullmatch(mascara_norm):
-                    resultados.append("Máscara correta")
-                    detalhes.append("")
-                else:
-                    resultados.append("No-show Técnico")
-                    detalhes.append("Não casa com o modelo (modo tolerante).")
+            key = (canon(causa), canon(motivo))
+            found = RULES_MAP.get(key)
+            if not found:
+                resultados.append("No-show Técnico")
+                detalhes.append("Motivo não reconhecido nas regras embutidas.")
                 mascaras_modelo.append(mascara_modelo_val)
+                continue
 
-            out = df.copy()
-
-            # preserva/garante O.S.
-            if "O.S." not in out.columns and "OS" in out.columns:
-                out = out.rename(columns={"OS": "O.S."})
-            if "O.S." not in out.columns:
-                out["O.S."] = ""
-
-            out["Causa detectada"] = causas
-            out["Motivo detectado"] = motivos
-            out["Máscara prestador (preenchida)"] = mascaras_preenchidas
-            out["Máscara prestador"] = mascaras_modelo
-            out["Causa. Motivo. Máscara (extra)"] = combos
-            out["Classificação No-show"] = resultados
-            out["Detalhe"] = detalhes
-
-            # Resultado No Show derivado
-            resultado_no_show = []
-            for r_cls, mot in zip(resultados, motivos):
-                cat = categoria_por_motivo(mot)
-                if cat:
-                    resultado_no_show.append(cat)
-                elif r_cls in ("Máscara correta", "No-show Cliente"):
-                    resultado_no_show.append("No-show Cliente")
-                else:
-                    resultado_no_show.append("No-show Técnico")
-            out["Resultado No Show"] = resultado_no_show
-
-            # -------------------- Alocação por LOGIN (com fallback por nome) --------------------
-            st.markdown("#### Alocação de atendentes")
-
-            usuarios_ativos = [
-                u for u in list_users(include_inactive=False)
-                if u.get("role") == "atendente" and int(u.get("active", 0)) == 1
-            ]
-            logins_disponiveis = sorted({u["username"] for u in usuarios_ativos})
-            nome_por_login = {u["username"]: u["name"] for u in usuarios_ativos}
-
-            logins_escolhidos = st.multiselect(
-                "Logins que participarão da conferência",
-                options=logins_disponiveis,
-                default=logins_disponiveis,
-                help="As O.S. serão distribuídas ciclicamente entre os logins selecionados.",
-            )
-
-            st.caption("Fallback por **nome** (apenas se você não quiser distribuir por login).")
-            qtd = st.number_input("Número de atendentes (fallback por nome)", 1, 200, 3)
-            nomes_raw = st.text_area(
-                "Nomes (1 por linha ou separados por , ; ) — usado apenas no fallback",
-                value="",
-            )
-
-            if "Login atendente" not in out.columns and logins_escolhidos:
-                import numpy as _np
-                bloco = int(_np.ceil(len(out) / max(1, len(logins_escolhidos))))
-                logins_alocados = (logins_escolhidos * bloco)[: len(out)]
-                out.insert(0, "Login atendente", logins_alocados)
-                out.insert(1, "Atendente designado", [nome_por_login.get(l, l) for l in logins_alocados])
-
-            if "Atendente designado" not in out.columns:
-                import re as _re, numpy as _np
-                nomes = [n.strip() for n in _re.split(r"[,;\n]+", nomes_raw) if n.strip()]
-                if not nomes:
-                    nomes = [f"Atendente {i+1}" for i in range(int(qtd))]
-                else:
-                    while len(nomes) < int(qtd):
-                        nomes.append(f"Atendente {len(nomes)+1}")
-                bloco = int(_np.ceil(len(out) / len(nomes)))
-                out.insert(0, "Atendente designado", (nomes * bloco)[: len(out)])
-
-            if "Login atendente" not in out.columns:
-                rev_login_por_nome = {v: k for k, v in nome_por_login.items()}
-                out.insert(0, "Login atendente", [rev_login_por_nome.get(str(n), "") for n in out["Atendente designado"]])
-            # ------------------------------------------------------------------------------------
-
-            # guarda OUT na sessão para permitir reatribuições no Módulo 2
-            st.session_state["out_df"] = out
-
-            st.success("Pré-análise concluída.")
-            st.dataframe(out, use_container_width=True)
-
-            # Exportar planilha da pré-análise
-            buf_pre = io.BytesIO()
-            with pd.ExcelWriter(buf_pre, engine="openpyxl") as w:
-                out.to_excel(w, index=False, sheet_name="Resultado")
-            st.download_button(
-                "⬇️ Baixar Excel — Pré-análise",
-                data=buf_pre.getvalue(),
-                file_name="resultado_no_show.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            )
-
-            # Publicar para o Módulo 2 (persistência compartilhada)
-            st.markdown("#### Publicar para conferência")
-            if st.button("📤 Publicar dataset da pré-análise"):
-                try:
-                    import os
-                    os.makedirs("data", exist_ok=True)
-                    out.to_parquet("data/pre_analise_publicada.parquet", index=False)
-                    st.success("✅ Dataset publicado em `data/pre_analise_publicada.parquet`.")
-                except Exception as e:
-                    st.error(f"Falha ao publicar: {e}")
-
-# ============================================================
-# MÓDULO 2 — Conferência (Análise) — com expander e botão de limpar
-# ============================================================
-with st.expander("Módulo 2 — Conferência (Análise)", expanded=True):
-
-    # 1) reaproveita DF desta sessão; 2) fallback: parquet publicado pelo Admin
-    out = st.session_state.get("out_df")
-    if out is None:
-        try:
-            out = pd.read_parquet("data/pre_analise_publicada.parquet")
-        except Exception:
-            out = None
-
-    if out is not None:
-
-        # ================== Bulk reassignment (ADMIN) ==================
-        if role == "admin" and "Login atendente" in out.columns:
-            with st.expander("🔁 Reatribuir O.S. (Admin)", expanded=False):
-                current_logins = sorted(out["Login atendente"].astype(str).unique())
-                ativos = [u for u in list_users(include_inactive=False) if int(u.get("active", 0)) == 1]
-                known_logins = sorted(set(current_logins) | {u["username"] for u in ativos})
-                nome_por_login_all = {u["username"]: u["name"] for u in ativos}
-
-                src = st.selectbox("Reatribuir de (login origem)", current_logins, key="re_src")
-                dst = st.selectbox("Para (login destino)", [l for l in known_logins if l != src], key="re_dst")
-                only_pend = st.checkbox("Apenas O.S. com status '⏳ Pendente'", value=True, key="re_pend")
-                qtd_max = st.number_input("Qtde a mover (0 = todas elegíveis)", min_value=0, max_value=len(out), value=0, step=1, key="re_qtd")
-
-                if st.button("🔁 Reatribuir O.S. para outro login", key="btn_reassign"):
-                    mask = out["Login atendente"].astype(str) == str(src)
-                    if only_pend:
-                        if "Status da conferência" in out.columns:
-                            pend_mask = out["Status da conferência"].astype(str).fillna("").str.contains("Pendente")
-                            mask = mask & pend_mask
-                        else:
-                            st.warning("Coluna 'Status da conferência' ainda não existe; reatribuindo **sem** filtrar pendentes.")
-                    idx = out[mask].index.tolist()
-                    if qtd_max and qtd_max > 0:
-                        idx = idx[:qtd_max]
-                    if not idx:
-                        st.info("Nada para reatribuir.")
-                    else:
-                        out.loc[idx, "Login atendente"] = dst
-                        out.loc[idx, "Atendente designado"] = [nome_por_login_all.get(dst, dst)] * len(idx)
-                        st.session_state["out_df"] = out
-                        st.success(f"Reatribuídas {len(idx)} O.S. de **{src}** → **{dst}**.")
-        # ===============================================================
-
-        # ========= LIMPAR CONFERÊNCIA (ADMIN) =========
-        if role == "admin":
-            with st.expander("🧹 Limpar conferência (todas as O.S.)", expanded=False):
-                st.warning(
-                    "Isso vai **apagar todos os campos de conferência** (máscara conferida, "
-                    "classificação ajustada, status, observações e validação) de **todas** as O.S. carregadas."
-                )
-                cols = st.columns(2)
-                confirm = cols[0].checkbox("Sim, quero limpar tudo", value=False)
-                if cols[1].button("🧹 Limpar agora", disabled=not confirm):
-                    conf_cols = [
-                        "Máscara conferida",
-                        "Classificação ajustada",
-                        "Status da conferência",
-                        "Observações",
-                        "Validação automática (conferida)",
-                        "Detalhe (app)",
-                    ]
-                    for c in conf_cols:
-                        if c in out.columns:
-                            out[c] = "" if c != "Status da conferência" else "⏳ Pendente"
-
-                    # limpa estados de widgets dinâmicos
-                    for k in list(st.session_state.keys()):
-                        if k.startswith(("mask_sel_", "mask_txt_", "class_", "status_", "obs_")):
-                            st.session_state.pop(k)
-
-                    st.session_state["out_df"] = out
-                    st.success("✅ Conferência limpa para todas as O.S.")
-                    st.rerun()
-        # ==============================================
-
-       # --- tela detalhada de conferência (reutilizável para admin e atendente) ---
-def render_conferencia_detalhada(out, role, username):
-   # (antes estava: st.markdown("### Conferência por atendente") ... o bloco inteiro)
-if role == "admin":
-    # Admin vê a parte detalhada APENAS dentro do expander (fechado por padrão)
-    with st.expander("🔎 Conferência detalhada por atendente (Admin)", expanded=False):
-        render_conferencia_detalhada(out, role, username)
-else:
-    # Atendente continua vendo a tela detalhada normalmente
-    render_conferencia_detalhada(out, role, username)
-
-    # chave de designação
-    chave = "Login atendente" if "Login atendente" in out.columns else "Atendente designado"
-
-    # quem escolhe o quê
-    if role == "admin":
-        valor_sel = st.selectbox(
-            f"Selecione { 'o login' if chave=='Login atendente' else 'o nome' }",
-            options=sorted(out[chave].astype(str).unique()),
-            help="Admin pode escolher qualquer atendente para conferir."
-        )
-    else:
-        if chave == "Login atendente":
-            valor_sel = (username or st.session_state.get("_auth_user", "") or "").strip()
-            st.info(f"Você está conferindo as O.S. de **{valor_sel or '—'}**.")
-        else:
-            valor_sel = st.selectbox(
-                "Selecione seu nome",
-                options=sorted(out[chave].astype(str).unique()),
-                help="Carrega apenas os registros designados ao seu nome."
-            )
-
-    df_atendente = out[out[chave].astype(str) == str(valor_sel)].copy()
-    st.markdown(f"**Total de registros para {valor_sel or '—'}:** {len(df_atendente)}")
-
-    # garante colunas de conferência
-    for col in [
-        "Máscara conferida",
-        "Classificação ajustada",
-        "Status da conferência",
-        "Observações",
-        "Validação automática (conferida)",
-        "Detalhe (app)",
-    ]:
-        if col not in df_atendente.columns:
-            df_atendente[col] = ""
-
-    classificacoes = ["No-show Cliente", "No-show Técnico", "Erro Agendamento", "Falta de equipamentos"]
-    status_opcoes  = ["⏳ Pendente", "✅ App acertou", "❌ App errou, atendente corrigiu", "⚠️ Atendente errou"]
-
-    # edição linha a linha
-    for i, row in df_atendente.iterrows():
-        st.markdown("---")
-        st.markdown(f"**O.S.:** {row.get('O.S.', '')}")
-        st.markdown(f"**Texto original:** {row.get('Causa. Motivo. Máscara (extra)', '')}")
-        st.markdown(f"**Classificação pré-análise:** {row.get('Classificação No-show', '')}")
-        st.markdown(f"**Resultado No Show (app):** {row.get('Resultado No Show', '')}")
-
-        detalhe_app = str(row.get("Detalhe", "")).strip()
-        df_atendente.at[i, "Detalhe (app)"] = detalhe_app
-        is_regra_especial = "regra especial aplicada" in detalhe_app.lower()
-        if detalhe_app:
-            st.warning(f"**Detalhe (regra especial):**\n\n{detalhe_app}", icon="⚠️") if is_regra_especial else st.info(f"**Detalhe do app:** {detalhe_app}")
-
-        modelo_oficial = "No-show Cliente" if is_regra_especial else str(row.get("Máscara prestador", "")).strip()
-        st.markdown(f"**Máscara modelo (oficial):** `{modelo_oficial}`")
-
-        opcoes_mask = ([modelo_oficial] if modelo_oficial else []) + ["(Outro texto)"]
-        escolha = st.selectbox(f"Máscara conferida — escolha (linha {i})", options=opcoes_mask, key=f"mask_sel_{i}")
-        if escolha == "(Outro texto)":
-            mask_conf = st.text_area(f"Digite a máscara conferida (linha {i})",
-                                     value=str(row.get("Máscara conferida", "")), key=f"mask_txt_{i}")
-        else:
-            mask_conf = escolha
-
-        # validação automática
-        if is_regra_especial:
-            validacao = "✅ Máscara correta" if canon(mask_conf) == canon("No-show Cliente") else "❌ Máscara incorreta"
-        else:
-            causa, motivo = row.get("Causa detectada", ""), row.get("Motivo detectado", "")
-            found = RULES_MAP.get((canon(causa), canon(motivo)))
-            if found:
-                _, regex, _ = found
-                mask_norm = re.sub(r"\s+", " ", str(mask_conf)).strip()
-                validacao = "✅ Máscara correta" if regex.fullmatch(mask_norm) else "❌ Máscara incorreta"
+            _motivo_oficial, regex, modelo = found
+            mascara_modelo_val = modelo or ""
+            mascara_norm = re.sub(r"\s+", " ", str(mascara)).strip()
+            if regex.fullmatch(mascara_norm):
+                resultados.append("Máscara correta")
+                detalhes.append("")
             else:
-                validacao = "⚠️ Motivo não reconhecido"
-        st.caption(f"**Validação automática (conferida):** {validacao}")
+                resultados.append("No-show Técnico")
+                detalhes.append("Não casa com o modelo (modo tolerante).")
+            mascaras_modelo.append(mascara_modelo_val)
 
-        # escreve no df em edição
-        df_atendente.at[i, "Máscara conferida"] = mask_conf
-        df_atendente.at[i, "Validação automática (conferida)"] = validacao
+        out = df.copy()
 
-        # classificação ajustada (default)
-        idx_default = (classificacoes.index("No-show Cliente") if is_regra_especial
-                       else classificacoes.index(row.get("Resultado No Show", "")) if row.get("Resultado No Show", "") in classificacoes
-                       else 0)
-        df_atendente.at[i, "Classificação ajustada"] = st.selectbox(
-            f"Classificação ajustada (linha {i})", options=classificacoes, index=idx_default, key=f"class_{i}"
+        # preserva/garante O.S.
+        if "O.S." not in out.columns and "OS" in out.columns:
+            out = out.rename(columns={"OS": "O.S."})
+        if "O.S." not in out.columns:
+            out["O.S."] = ""
+
+        out["Causa detectada"] = causas
+        out["Motivo detectado"] = motivos
+        out["Máscara prestador (preenchida)"] = mascaras_preenchidas
+        out["Máscara prestador"] = mascaras_modelo
+        out["Causa. Motivo. Máscara (extra)"] = combos
+        out["Classificação No-show"] = resultados
+        out["Detalhe"] = detalhes
+
+        # Resultado No Show derivado
+        resultado_no_show = []
+        for r_cls, mot in zip(resultados, motivos):
+            cat = categoria_por_motivo(mot)
+            if cat:
+                resultado_no_show.append(cat)
+            elif r_cls in ("Máscara correta", "No-show Cliente"):
+                resultado_no_show.append("No-show Cliente")
+            else:
+                resultado_no_show.append("No-show Técnico")
+        out["Resultado No Show"] = resultado_no_show
+
+        # -------------------- Alocação por LOGIN (com fallback por nome) --------------------
+        st.markdown("#### Alocação de atendentes")
+
+        usuarios_ativos = [
+            u for u in list_users(include_inactive=False)
+            if u.get("role") == "atendente" and int(u.get("active", 0)) == 1
+        ]
+        logins_disponiveis = sorted({u["username"] for u in usuarios_ativos})
+        nome_por_login = {u["username"]: u["name"] for u in usuarios_ativos}
+
+        logins_escolhidos = st.multiselect(
+            "Logins que participarão da conferência",
+            options=logins_disponiveis,
+            default=logins_disponiveis,
+            help="As O.S. serão distribuídas ciclicamente entre os logins selecionados.",
         )
 
-        status_atual = str(row.get("Status da conferência", "")).strip()
-        idx_status = status_opcoes.index(status_atual) if status_atual in status_opcoes else 0
-        df_atendente.at[i, "Status da conferência"] = st.selectbox(
-            f"Status da conferência (linha {i})", options=status_opcoes, index=idx_status, key=f"status_{i}"
-        )
-        df_atendente.at[i, "Observações"] = st.text_area(
-            f"Observações (linha {i})", value=str(row.get("Observações", "")), key=f"obs_{i}"
+        st.caption("Fallback por **nome** (apenas se você não quiser distribuir por login).")
+        qtd = st.number_input("Número de atendentes (fallback por nome)", 1, 200, 3)
+        nomes_raw = st.text_area(
+            "Nomes (1 por linha ou separados por , ; ) — usado apenas no fallback",
+            value="",
         )
 
-    # salvar no servidor
-    st.markdown("#### Salvar no servidor")
-    if st.button("💾 Salvar conferência deste atendente", type="primary", key="save_att"):
-        import uuid
-        batch_id = str(uuid.uuid4())[:8]
-        gravados = upsert_reviews_from_df(
-            df_atendente.copy(),
-            username=(username or st.session_state.get("_auth_user", "")),
-            batch_id=batch_id,
+        if "Login atendente" not in out.columns and logins_escolhidos:
+            import numpy as _np
+            bloco = int(_np.ceil(len(out) / max(1, len(logins_escolhidos))))
+            logins_alocados = (logins_escolhidos * bloco)[: len(out)]
+            out.insert(0, "Login atendente", logins_alocados)
+            out.insert(1, "Atendente designado", [nome_por_login.get(l, l) for l in logins_alocados])
+
+        if "Atendente designado" not in out.columns:
+            import re as _re, numpy as _np
+            nomes = [n.strip() for n in _re.split(r"[,;\n]+", nomes_raw) if n.strip()]
+            if not nomes:
+                nomes = [f"Atendente {i+1}" for i in range(int(qtd))]
+            else:
+                while len(nomes) < int(qtd):
+                    nomes.append(f"Atendente {len(nomes)+1}")
+            bloco = int(_np.ceil(len(out) / len(nomes)))
+            out.insert(0, "Atendente designado", (nomes * bloco)[: len(out)])
+
+        if "Login atendente" not in out.columns:
+            rev_login_por_nome = {v: k for k, v in nome_por_login.items()}
+            out.insert(0, "Login atendente", [rev_login_por_nome.get(str(n), "") for n in out["Atendente designado"]])
+        # ------------------------------------------------------------------------------------
+
+        # guarda OUT na sessão para permitir reatribuições no Módulo 2
+        st.session_state["out_df"] = out
+
+        st.success("Pré-análise concluída.")
+        st.dataframe(out, use_container_width=True)
+
+        # Exportar planilha da pré-análise
+        buf_pre = io.BytesIO()
+        with pd.ExcelWriter(buf_pre, engine="openpyxl") as w:
+            out.to_excel(w, index=False, sheet_name="Resultado")
+        st.download_button(
+            "⬇️ Baixar Excel — Pré-análise",
+            data=buf_pre.getvalue(),
+            file_name="resultado_no_show.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
-        st.success(f"✅ {gravados} linha(s) salva(s) (lote {batch_id}).") if gravados else st.info("Nada novo para salvar.")
 
-    # tabela final + export do atendente
-    st.markdown("### Tabela final da conferência")
-    st.dataframe(df_atendente, use_container_width=True)
+        # Publicar para o Módulo 2 (persistência compartilhada)
+        st.markdown("#### Publicar para conferência")
+        if st.button("📤 Publicar dataset da pré-análise"):
+            try:
+                import os
+                os.makedirs("data", exist_ok=True)
+                out.to_parquet("data/pre_analise_publicada.parquet", index=False)
+                st.success("✅ Dataset publicado em `data/pre_analise_publicada.parquet`.")
+            except Exception as e:
+                st.error(f"Falha ao publicar: {e}")
 
-    buf_conf = io.BytesIO()
-    with pd.ExcelWriter(buf_conf, engine="openpyxl") as w:
-        df_atendente.to_excel(w, index=False, sheet_name="Conferencia")
-    st.download_button(
-        "⬇️ Baixar Excel — Conferência do atendente",
-        data=buf_conf.getvalue(),
-        file_name=f"conferencia_{valor_sel or 'atendente'}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        help="Exporta a conferência do atendente com a máscara conferida e a validação automática.",
-    )
+# ============================================================
+# MÓDULO 2 — Conferência (sem dupla checagem)
+# ============================================================
+st.markdown("---")
+st.header("Módulo 2 — Conferência (Análise)")
 
+# 1) reaproveita DF desta sessão; 2) fallback: parquet publicado pelo Admin
+out = st.session_state.get("out_df")
+if out is None:
+    try:
+        out = pd.read_parquet("data/pre_analise_publicada.parquet")
+    except Exception:
+        out = None
+
+if out is not None:
+
+    # ================== Bulk reassignment (ADMIN) ==================
+    if role == "admin" and "Login atendente" in out.columns:
+        with st.expander("🔁 Reatribuir O.S. (Admin)", expanded=False):
+            # logins atuais na planilha + logins ativos no banco
+            current_logins = sorted(out["Login atendente"].astype(str).unique())
+            ativos = [u for u in list_users(include_inactive=False) if int(u.get("active", 0)) == 1]
+            known_logins = sorted(set(current_logins) | {u["username"] for u in ativos})
+            nome_por_login_all = {u["username"]: u["name"] for u in ativos}
+
+            src = st.selectbox("Reatribuir de (login origem)", current_logins, key="re_src")
+            dst = st.selectbox("Para (login destino)", [l for l in known_logins if l != src], key="re_dst")
+            only_pend = st.checkbox("Apenas O.S. com status '⏳ Pendente'", value=True, key="re_pend")
+            qtd_max = st.number_input("Qtde a mover (0 = todas elegíveis)", min_value=0, max_value=len(out), value=0, step=1, key="re_qtd")
+
+            if st.button("🔁 Reatribuir O.S. para outro login", key="btn_reassign"):
+                mask = out["Login atendente"].astype(str) == str(src)
+                if only_pend:
+                    if "Status da conferência" in out.columns:
+                        pend_mask = out["Status da conferência"].astype(str).fillna("").str.contains("Pendente")
+                        mask = mask & pend_mask
+                    else:
+                        st.warning("Coluna 'Status da conferência' ainda não existe; reatribuindo **sem** filtrar pendentes.")
+                idx = out[mask].index.tolist()
+                if qtd_max and qtd_max > 0:
+                    idx = idx[:qtd_max]
+                if not idx:
+                    st.info("Nada para reatribuir.")
+                else:
+                    out.loc[idx, "Login atendente"] = dst
+                    out.loc[idx, "Atendente designado"] = [nome_por_login_all.get(dst, dst)] * len(idx)
+                    st.session_state["out_df"] = out
+                    st.success(f"Reatribuídas {len(idx)} O.S. de **{src}** → **{dst}**.")
+    # ===============================================================
+
+    # ============ Utilitários de limpeza ============
+    with st.expander("🧰 Utilitários de tela", expanded=False):
+        c1, c2 = st.columns(2)
+
+        with c1:
+            st.caption("Recarrega a página e limpa todos os widgets desta tela (não altera dados).")
+            if st.button("🧽 Limpar SÓ a tela"):
+                # remove chaves que usamos nos widgets de edição
+                prefixes = ("mask_sel_", "mask_txt_", "class_", "status_", "obs_")
+                for k in list(st.session_state.keys()):
+                    if any(k.startswith(p) for p in prefixes):
+                        del st.session_state[k]
+                st.rerun()
+
+        with c2:
+            st.caption("Zera os campos de conferência do *dataset* carregado nesta sessão.")
+            if st.button("🧹 Limpar conferência (todas as O.S.)"):
+                cols_clear = [
+                    "Máscara conferida",
+                    "Classificação ajustada",
+                    "Status da conferência",
+                    "Observações",
+                    "Validação automática (conferida)",
+                    "Detalhe (app)",
+                ]
+                for col in cols_clear:
+                    if col in out.columns:
+                        out[col] = ""
+                st.session_state["out_df"] = out
+                st.success("Conferência limpa para todas as O.S. do dataset carregado.")
+
+    # ======= Resumo / Consolidação (Admin) =======
+    if role == "admin":
+        with st.expander("📊 Resumo / Consolidação (tempo real)", expanded=True):
+            df_all = list_all_reviews_df()
+            if df_all.empty:
+                st.info("Nenhum dado salvo ainda.")
+            else:
+                # pequenas normalizações
+                if "username" in df_all.columns:
+                    df_all["username"] = df_all["username"].astype(str)
+                if "Status da conferência" in df_all.columns:
+                    df_all["Status da conferência"] = df_all["Status da conferência"].astype(str)
+
+                # métricas por atendente
+                grp = (
+                    df_all
+                    .groupby("username", dropna=False)
+                    .agg(
+                        registros=("username", "count"),
+                        pendentes=("Status da conferência", lambda s: (s=="⏳ Pendente").sum()),
+                        acertou=("Status da conferência", lambda s: (s=="✅ App acertou").sum()),
+                        app_errou=("Status da conferência", lambda s: (s=="❌ App errou, atendente corrigiu").sum()),
+                        atend_errou=("Status da conferência", lambda s: (s=="⚠️ Atendente errou").sum()),
+                    )
+                    .reset_index()
+                    .sort_values("registros", ascending=False)
+                )
+                st.dataframe(grp, use_container_width=True)
+
+                # botão para exportar consolidação
+                buf = io.BytesIO()
+                with pd.ExcelWriter(buf, engine="openpyxl") as w:
+                    df_all.to_excel(w, index=False, sheet_name="Consolidado")
+                    grp.to_excel(w, index=False, sheet_name="Resumo_por_usuario")
+                st.download_button(
+                    "⬇️ Baixar consolidação (XLSX)",
+                    data=buf.getvalue(),
+                    file_name=f"consolidado_{datetime.now():%Y%m%d-%H%M}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="dl_all_admin",
+                )
+
+    # ---- função interna: tela detalhada (reutilizável) ----
+    def _render_conferencia_detalhada():
+        st.markdown("### Conferência por atendente")
+
+        chave = "Login atendente" if "Login atendente" in out.columns else "Atendente designado"
+
+        if role == "admin":
+            valor_sel = st.selectbox(
+                f"Selecione { 'o login' if chave=='Login atendente' else 'o nome' }",
+                options=sorted(out[chave].astype(str).unique()),
+                help="Admin pode escolher qualquer atendente para conferir."
+            )
+        else:
+            if chave == "Login atendente":
+                valor_sel = (username or st.session_state.get("_auth_user", "") or "").strip()
+                st.info(f"Você está conferindo as O.S. de **{valor_sel or '—'}**.")
+            else:
+                valor_sel = st.selectbox(
+                    "Selecione seu nome",
+                    options=sorted(out[chave].astype(str).unique()),
+                    help="Selecione o atendente para carregar apenas os registros designados."
+                )
+
+        df_atendente = out[out[chave].astype(str) == str(valor_sel)].copy()
+        st.markdown(f"**Total de registros para {valor_sel or '—'}:** {len(df_atendente)}")
+
+        # Garante colunas de conferência
+        for col in [
+            "Máscara conferida",
+            "Classificação ajustada",
+            "Status da conferência",
+            "Observações",
+            "Validação automática (conferida)",
+            "Detalhe (app)",
+        ]:
+            if col not in df_atendente.columns:
+                df_atendente[col] = ""
+
+        # Opções
+        classificacoes = [
+            "No-show Cliente",
+            "No-show Técnico",
+            "Erro Agendamento",
+            "Falta de equipamentos",
+        ]
+        status_opcoes = [
+            "⏳ Pendente",
+            "✅ App acertou",
+            "❌ App errou, atendente corrigiu",
+            "⚠️ Atendente errou",
+        ]
+
+        # ===== Edição linha a linha =====
+        for i, row in df_atendente.iterrows():
+            st.markdown("---")
+            st.markdown(f"**O.S.:** {row.get('O.S.', '')}")
+            st.markdown(f"**Texto original:** {row.get('Causa. Motivo. Máscara (extra)', '')}")
+            st.markdown(f"**Classificação pré-análise:** {row.get('Classificação No-show', '')}")
+            st.markdown(f"**Resultado No Show (app):** {row.get('Resultado No Show', '')}")
+
+            # --- Detalhe / regra especial
+            detalhe_app = str(row.get("Detalhe", "")).strip()
+            df_atendente.at[i, "Detalhe (app)"] = detalhe_app
+            is_regra_especial = "regra especial aplicada" in detalhe_app.lower()
+
+            if detalhe_app:
+                if is_regra_especial:
+                    st.warning(f"**Detalhe (regra especial):**\n\n{detalhe_app}", icon="⚠️")
+                else:
+                    st.info(f"**Detalhe do app:** {detalhe_app}")
+
+            # Modelo oficial
+            modelo_oficial = "No-show Cliente" if is_regra_especial else str(row.get("Máscara prestador", "")).strip()
+            st.markdown(f"**Máscara modelo (oficial):** `{modelo_oficial}`")
+
+            # Máscara conferida (select + opção texto)
+            opcoes_mask = ([modelo_oficial] if modelo_oficial else []) + ["(Outro texto)"]
+            escolha = st.selectbox(
+                f"Máscara conferida — escolha (linha {i})",
+                options=opcoes_mask,
+                key=f"mask_sel_{i}",
+                help=(
+                    "Escolha a máscara oficial OU selecione '(Outro texto)' para digitar a máscara conferida no sistema. "
+                    "Em caso de regra especial, a máscara esperada é 'No-show Cliente'."
+                ),
+            )
+            if escolha == "(Outro texto)":
+                mask_conf = st.text_area(
+                    f"Digite a máscara conferida (linha {i})",
+                    value=str(row.get("Máscara conferida", "")),
+                    key=f"mask_txt_{i}",
+                    help="Se escolheu '(Outro texto)', digite aqui a máscara exata registrada na O.S.",
+                )
+            else:
+                mask_conf = escolha
+
+            # Validação automática
+            if is_regra_especial:
+                validacao = "✅ Máscara correta" if canon(mask_conf) == canon("No-show Cliente") else "❌ Máscara incorreta"
+            else:
+                causa = row.get("Causa detectada", "")
+                motivo = row.get("Motivo detectado", "")
+                key_rm = (canon(causa), canon(motivo))
+                found = RULES_MAP.get(key_rm)
+                if found:
+                    _, regex, _ = found
+                    mask_norm = re.sub(r"\s+", " ", str(mask_conf)).strip()
+                    validacao = "✅ Máscara correta" if regex.fullmatch(mask_norm) else "❌ Máscara incorreta"
+                else:
+                    validacao = "⚠️ Motivo não reconhecido"
+
+            st.caption(f"**Validação automática (conferida):** {validacao}")
+
+            # Atualiza DF com edição
+            df_atendente.at[i, "Máscara conferida"] = mask_conf
+            df_atendente.at[i, "Validação automática (conferida)"] = validacao
+
+            # Classificação ajustada
+            if is_regra_especial and "No-show Cliente" in classificacoes:
+                idx_default = classificacoes.index("No-show Cliente")
+            else:
+                idx_default = (
+                    classificacoes.index(row.get("Resultado No Show", ""))
+                    if row.get("Resultado No Show", "") in classificacoes
+                    else 0
+                )
+            df_atendente.at[i, "Classificação ajustada"] = st.selectbox(
+                f"Classificação ajustada (linha {i})",
+                options=classificacoes,
+                index=idx_default,
+                key=f"class_{i}",
+                help="Ajuste a classificação final conforme a conferência no sistema.",
+            )
+
+            # Status da conferência (default Pendente; se existir valor, usa-o)
+            status_atual = str(row.get("Status da conferência", "")).strip()
+            idx_status = status_opcoes.index(status_atual) if status_atual in status_opcoes else 0
+            df_atendente.at[i, "Status da conferência"] = st.selectbox(
+                f"Status da conferência (linha {i})",
+                options=status_opcoes,
+                index=idx_status,
+                key=f"status_{i}",
+                help="Registre o desfecho ou mantenha pendente.",
+            )
+
+            # Observações
+            df_atendente.at[i, "Observações"] = st.text_area(
+                f"Observações (linha {i})",
+                value=str(row.get("Observações", "")),
+                key=f"obs_{i}",
+                help="Observações complementares (evidências, contato, RT, etc.).",
+            )
+
+        # ==== Persistência da conferência no servidor ====
+        st.markdown("#### Salvar no servidor")
+        if st.button("💾 Salvar conferência deste atendente", type="primary", key="save_att"):
+            batch_id = str(uuid.uuid4())[:8]
+            gravados = upsert_reviews_from_df(
+                df_atendente.copy(),
+                username=(username or st.session_state.get("_auth_user", "")),
+                batch_id=batch_id,
+            )
+            if gravados:
+                st.success(f"✅ {gravados} linha(s) salva(s) (lote {batch_id}).")
+            else:
+                st.info("Nada novo para salvar.")
+
+        # Tabela final + export do atendente
+        st.markdown("### Tabela final da conferência")
+        st.dataframe(df_atendente, use_container_width=True)
+
+        buf_conf = io.BytesIO()
+        with pd.ExcelWriter(buf_conf, engine="openpyxl") as w:
+            df_atendente.to_excel(w, index=False, sheet_name="Conferencia")
+
+        st.download_button(
+            "⬇️ Baixar Excel — Conferência do atendente",
+            data=buf_conf.getvalue(),
+            file_name=f"conferencia_{valor_sel or 'atendente'}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            help="Exporta a conferência do atendente com a máscara conferida e a validação automática.",
+        )
+
+    # Chamada da tela detalhada (Admin com expander; atendente sem)
+    if role == "admin":
+        with st.expander("🔎 Conferência detalhada por atendente (Admin)", expanded=False):
+            _render_conferencia_detalhada()
+    else:
+        _render_conferencia_detalhada()
+
+else:
+    st.info("Não há pré-análise disponível. Peça para o **Admin** publicar no Módulo 1.")
 
 # =========================
-# Admin — Usuários (somente Admin)
+# Admin — Usuários (somente Admin, com expander)
 # =========================
 def render_admin_users():
     with st.expander("⚙️ Admin — Usuários", expanded=False):
-        st.header("Admin — Usuários")
-
         tab_listar, tab_criar, tab_senha, tab_status = st.tabs(
             ["👥 Listar", "➕ Criar", "🔑 Trocar senha", "🚦 Ativar/Desativar"]
         )
