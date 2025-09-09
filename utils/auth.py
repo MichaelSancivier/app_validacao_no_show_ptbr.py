@@ -14,10 +14,10 @@ def _deep_to_dict(obj):
     return obj
 
 def _load_auth_config():
-    # PRODUÇÃO: usa Secrets do Streamlit Cloud
+    # PRODUÇÃO: Secrets do Streamlit Cloud
     if "auth" in st.secrets:
         return _deep_to_dict(st.secrets["auth"])
-    # DEV opcional: auth.yaml (não subir no GitHub)
+    # DEV (opcional): auth.yaml local (NÃO subir no GitHub)
     if os.path.exists("auth.yaml"):
         try:
             import yaml
@@ -31,6 +31,24 @@ def _load_auth_config():
         "Defina st.secrets['auth'] em Settings → Secrets do Streamlit Cloud."
     )
 
+def _call_login(authenticator: stauth.Authenticate):
+    """Chama .login() de forma compatível com versões novas/antigas."""
+    try:
+        params = inspect.signature(authenticator.login).parameters
+    except Exception:
+        params = {}
+
+    if "location" in params and "form_name" not in params:
+        # Versões novas: só 'location'
+        try:
+            from streamlit_authenticator.utilities.constants import Location
+            return authenticator.login(location=Location.MAIN)
+        except Exception:
+            return authenticator.login(location="main")
+    else:
+        # Versões antigas: (form_name, location)
+        return authenticator.login("Login", "main")
+
 def login():
     cfg = _load_auth_config()
 
@@ -41,15 +59,10 @@ def login():
         cfg["cookie"]["expiry_days"],
     )
 
-    # --- Chamada compatível com TODAS as versões ---
-    # 1) tente com enum Location (versões novas)
-    try:
-        try:
-            from streamlit_authenticator.utilities.constants import Location
-            loc = Location.MAIN
-        except Exception:
-            loc = "main"  # se enum não existir, use string
-        name, auth_status, username = authenticator.login(location=loc)
-    except TypeError:
-        # assinatura antiga: (form_name, location)
-        name, auth_status, username = auth_
+    name, auth_status, username = _call_login(authenticator)
+
+    role = None
+    if auth_status:
+        role = cfg["credentials"]["usernames"][username].get("role", "atendente")
+
+    return authenticator, auth_status, username, name, role
