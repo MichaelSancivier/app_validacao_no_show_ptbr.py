@@ -466,7 +466,14 @@ with st.expander("Módulo 2 — Conferência (Análise)", expanded=True):
 
        # --- tela detalhada de conferência (reutilizável para admin e atendente) ---
 def render_conferencia_detalhada(out, role, username):
-    st.markdown("### Conferência por atendente")
+   # (antes estava: st.markdown("### Conferência por atendente") ... o bloco inteiro)
+if role == "admin":
+    # Admin vê a parte detalhada APENAS dentro do expander (fechado por padrão)
+    with st.expander("🔎 Conferência detalhada por atendente (Admin)", expanded=False):
+        render_conferencia_detalhada(out, role, username)
+else:
+    # Atendente continua vendo a tela detalhada normalmente
+    render_conferencia_detalhada(out, role, username)
 
     # chave de designação
     chave = "Login atendente" if "Login atendente" in out.columns else "Atendente designado"
