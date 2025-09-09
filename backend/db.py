@@ -2,7 +2,7 @@ from __future__ import annotations
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, declarative_base
 
-DB_URL = "sqlite:///data/no_show_v2.db"  # será criado automaticamente
+DB_URL = "sqlite:///data/no_show_v3.db"  # será criado automaticamente
 
 engine = create_engine(DB_URL, future=True)
 
