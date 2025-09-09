@@ -464,7 +464,6 @@ if "out" in locals() and out is not None:
         if col not in df_atendente.columns:
             df_atendente[col] = ""
 
-# Opções do seletor "Classificação ajustada"
 classificacoes = [
     "No-show Cliente",
     "No-show Técnico",
