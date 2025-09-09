@@ -175,199 +175,214 @@ def categoria_por_motivo(motivo: str) -> str:
     return ""
 
 # ============================================================
-# MÓDULO 1 — Pré-análise
+# MÓDULO 1 — Pré-análise (somente ADMIN)
 # ============================================================
 st.header("Módulo 1 — Validador (Pré-análise)")
 
-file = st.file_uploader(
-    "Exportação (xlsx/csv) — coluna principal com 'Causa. Motivo. Máscara ...' e, opcionalmente, uma coluna especial",
-    type=["xlsx", "csv"],
-    help="A coluna especial é usada para a 'regra especial' (ex.: Automático - PORTAL, Michelin, OUTRO).",
-)
-
-out = None
-
-with st.expander("Adicionar regras rápidas (runtime)", expanded=False):
-    st.caption("Formato: `causa ; motivo ; mascara_modelo` — uma regra por linha.")
-    exemplo = "Agendamento cancelado.; Erro de Agendamento – Documento inválido; OS apresentou erro de 0 identificado via 0. Cliente 0 informado em 0."
-    regras_txt = st.text_area("Cole aqui as regras", value="", placeholder=exemplo, height=120)
-    c1, c2 = st.columns(2)
-    aplicar = c1.button("Aplicar regras")
-    limpar = c2.button("Limpar")
-    if limpar:
-        st.session_state.pop("ultimas_regras_aplicadas", None)
-        st.experimental_rerun()
-    if aplicar:
-        erros = []
-        for ln, linha in enumerate(regras_txt.splitlines(), start=1):
-            linha = linha.strip()
-            if not linha:
-                continue
-            parts = [p.strip() for p in linha.split(";", 2)]
-            if len(parts) != 3:
-                erros.append(f"Linha {ln}: use 2 ';' (causa ; motivo ; mascara_modelo)")
-                continue
-            causa, motivo, mascara = parts
-            if not causa or not motivo or not mascara:
-                erros.append(f"Linha {ln}: campos vazios")
-                continue
-            REGRAS_EMBUTIDAS.append({"causa": causa, "motivo": motivo, "mascara_modelo": mascara})
-        if erros:
-            for e in erros:
-                st.warning(e)
-        else:
-            recarregar_regras()
-            st.success("✅ Regras aplicadas e ativas nesta sessão.")
-
-if file:
-    df = read_any(file)
-
-    col_main = st.selectbox(
-        "Coluna principal (Causa. Motivo. Máscara ...)",
-        df.columns,
-        help="Texto completo enviado pelo prestador: 'Causa. Motivo. Máscara ...'",
-    )
-    col_especial = st.selectbox(
-        "Coluna especial (opcional) — gatilhos: Automático - PORTAL / Michelin / OUTRO",
-        ["(Nenhuma)"] + list(df.columns),
-        help="Se esta coluna contiver qualquer um dos gatilhos, a linha vira 'No-show Cliente' por regra especial.",
+if role != "admin":
+    st.info("Pré-análise disponível apenas para **Admin**. Vá para o **Módulo 2 — Conferência**.")
+    out = None
+else:
+    file = st.file_uploader(
+        "Exportação (xlsx/csv) — coluna principal com 'Causa. Motivo. Máscara ...' e, opcionalmente, uma coluna especial",
+        type=["xlsx", "csv"],
+        help="A coluna especial é usada para a 'regra especial' (ex.: Automático - PORTAL, Michelin, OUTRO).",
     )
 
-    # --- cálculo dos resultados por linha ---
-    resultados, detalhes = [], []
-    causas, motivos, mascaras_preenchidas = [], [], []
-    combos, mascaras_modelo = [], []
+    out = None
 
-    for _, row in df.iterrows():
-        causa, motivo, mascara = detect_motivo_and_mask(row.get(col_main, ""))
-        causas.append(causa)
-        motivos.append(motivo)
-        mascaras_preenchidas.append(mascara)
-        partes = [p for p in [str(causa).strip(), str(motivo).strip(), str(mascara).strip()] if p]
-        combos.append(" ".join(partes))
+    with st.expander("Adicionar regras rápidas (runtime)", expanded=False):
+        st.caption("Formato: `causa ; motivo ; mascara_modelo` — uma regra por linha.")
+        exemplo = "Agendamento cancelado.; Erro de Agendamento – Documento inválido; OS apresentou erro de 0 identificado via 0. Cliente 0 informado em 0."
+        regras_txt = st.text_area("Cole aqui as regras", value="", placeholder=exemplo, height=120)
+        c1, c2 = st.columns(2)
+        aplicar = c1.button("Aplicar regras")
+        limpar = c2.button("Limpar")
+        if limpar:
+            st.session_state.pop("ultimas_regras_aplicadas", None)
+            st.experimental_rerun()
+        if aplicar:
+            erros = []
+            for ln, linha in enumerate(regras_txt.splitlines(), start=1):
+                linha = linha.strip()
+                if not linha:
+                    continue
+                parts = [p.strip() for p in linha.split(";", 2)]
+                if len(parts) != 3:
+                    erros.append(f"Linha {ln}: use 2 ';' (causa ; motivo ; mascara_modelo)")
+                    continue
+                causa, motivo, mascara = parts
+                if not causa or not motivo or not mascara:
+                    erros.append(f"Linha {ln}: campos vazios")
+                    continue
+                REGRAS_EMBUTIDAS.append({"causa": causa, "motivo": motivo, "mascara_modelo": mascara})
+            if erros:
+                for e in erros:
+                    st.warning(e)
+            else:
+                recarregar_regras()
+                st.success("✅ Regras aplicadas e ativas nesta sessão.")
 
-        mascara_modelo_val = ""
-        if col_especial != "(Nenhuma)":
-            valor_especial = row.get(col_especial, "")
-            if eh_especial_no_show_cliente(valor_especial):
-                resultados.append("No-show Cliente")
-                detalhes.append(
-                    f"Regra especial aplicada: coluna especial = '{valor_especial}'. "
-                    f"Gatilhos ativos: {', '.join(ESPECIAIS_NO_SHOW_CLIENTE)}"
-                )
+    if file:
+        df = read_any(file)
+
+        col_main = st.selectbox(
+            "Coluna principal (Causa. Motivo. Máscara ...)",
+            df.columns,
+            help="Texto completo enviado pelo prestador: 'Causa. Motivo. Máscara ...'",
+        )
+        col_especial = st.selectbox(
+            "Coluna especial (opcional) — gatilhos: Automático - PORTAL / Michelin / OUTRO",
+            ["(Nenhuma)"] + list(df.columns),
+            help="Se esta coluna contiver qualquer um dos gatilhos, a linha vira 'No-show Cliente' por regra especial.",
+        )
+
+        # --- cálculo dos resultados por linha ---
+        resultados, detalhes = [], []
+        causas, motivos, mascaras_preenchidas = [], [], []
+        combos, mascaras_modelo = [], []
+
+        for _, row in df.iterrows():
+            causa, motivo, mascara = detect_motivo_and_mask(row.get(col_main, ""))
+            causas.append(causa)
+            motivos.append(motivo)
+            mascaras_preenchidas.append(mascara)
+            partes = [p for p in [str(causa).strip(), str(motivo).strip(), str(mascara).strip()] if p]
+            combos.append(" ".join(partes))
+
+            mascara_modelo_val = ""
+            if col_especial != "(Nenhuma)":
+                valor_especial = row.get(col_especial, "")
+                if eh_especial_no_show_cliente(valor_especial):
+                    resultados.append("No-show Cliente")
+                    detalhes.append(
+                        f"Regra especial aplicada: coluna especial = '{valor_especial}'. "
+                        f"Gatilhos ativos: {', '.join(ESPECIAIS_NO_SHOW_CLIENTE)}"
+                    )
+                    mascaras_modelo.append(mascara_modelo_val)
+                    continue
+
+            key = (canon(causa), canon(motivo))
+            found = RULES_MAP.get(key)
+            if not found:
+                resultados.append("No-show Técnico")
+                detalhes.append("Motivo não reconhecido nas regras embutidas.")
                 mascaras_modelo.append(mascara_modelo_val)
                 continue
 
-        key = (canon(causa), canon(motivo))
-        found = RULES_MAP.get(key)
-        if not found:
-            resultados.append("No-show Técnico")
-            detalhes.append("Motivo não reconhecido nas regras embutidas.")
+            _motivo_oficial, regex, modelo = found
+            mascara_modelo_val = modelo or ""
+            mascara_norm = re.sub(r"\s+", " ", str(mascara)).strip()
+            if regex.fullmatch(mascara_norm):
+                resultados.append("Máscara correta")
+                detalhes.append("")
+            else:
+                resultados.append("No-show Técnico")
+                detalhes.append("Não casa com o modelo (modo tolerante).")
             mascaras_modelo.append(mascara_modelo_val)
-            continue
 
-        _motivo_oficial, regex, modelo = found
-        mascara_modelo_val = modelo or ""
-        mascara_norm = re.sub(r"\s+", " ", str(mascara)).strip()
-        if regex.fullmatch(mascara_norm):
-            resultados.append("Máscara correta")
-            detalhes.append("")
-        else:
-            resultados.append("No-show Técnico")
-            detalhes.append("Não casa com o modelo (modo tolerante).")
-        mascaras_modelo.append(mascara_modelo_val)
+        out = df.copy()
 
-    out = df.copy()
+        # preserva/garante O.S.
+        if "O.S." not in out.columns and "OS" in out.columns:
+            out = out.rename(columns={"OS": "O.S."})
+        if "O.S." not in out.columns:
+            out["O.S."] = ""
 
-    # preserva/garante O.S.
-    if "O.S." not in out.columns and "OS" in out.columns:
-        out = out.rename(columns={"OS": "O.S."})
-    if "O.S." not in out.columns:
-        out["O.S."] = ""
+        out["Causa detectada"] = causas
+        out["Motivo detectado"] = motivos
+        out["Máscara prestador (preenchida)"] = mascaras_preenchidas
+        out["Máscara prestador"] = mascaras_modelo
+        out["Causa. Motivo. Máscara (extra)"] = combos
+        out["Classificação No-show"] = resultados
+        out["Detalhe"] = detalhes
 
-    out["Causa detectada"] = causas
-    out["Motivo detectado"] = motivos
-    out["Máscara prestador (preenchida)"] = mascaras_preenchidas
-    out["Máscara prestador"] = mascaras_modelo
-    out["Causa. Motivo. Máscara (extra)"] = combos
-    out["Classificação No-show"] = resultados
-    out["Detalhe"] = detalhes
+        # Resultado No Show derivado
+        resultado_no_show = []
+        for r_cls, mot in zip(resultados, motivos):
+            cat = categoria_por_motivo(mot)
+            if cat:
+                resultado_no_show.append(cat)
+            elif r_cls in ("Máscara correta", "No-show Cliente"):
+                resultado_no_show.append("No-show Cliente")
+            else:
+                resultado_no_show.append("No-show Técnico")
+        out["Resultado No Show"] = resultado_no_show
 
-    # Resultado No Show derivado
-    resultado_no_show = []
-    for r_cls, mot in zip(resultados, motivos):
-        cat = categoria_por_motivo(mot)
-        if cat:
-            resultado_no_show.append(cat)
-        elif r_cls in ("Máscara correta", "No-show Cliente"):
-            resultado_no_show.append("No-show Cliente")
-        else:
-            resultado_no_show.append("No-show Técnico")
-    out["Resultado No Show"] = resultado_no_show
+        # -------------------- Alocação por LOGIN (com fallback por nome) --------------------
+        st.markdown("#### Alocação de atendentes")
 
-    # -------------------- Alocação por LOGIN (com fallback por nome) --------------------
-    st.markdown("#### Alocação de atendentes")
+        usuarios_ativos = [
+            u for u in list_users(include_inactive=False)
+            if u.get("role") == "atendente" and int(u.get("active", 0)) == 1
+        ]
+        logins_disponiveis = sorted({u["username"] for u in usuarios_ativos})
+        nome_por_login = {u["username"]: u["name"] for u in usuarios_ativos}
 
-    usuarios_ativos = [
-        u for u in list_users(include_inactive=False)
-        if u.get("role") == "atendente" and int(u.get("active", 0)) == 1
-    ]
-    logins_disponiveis = sorted({u["username"] for u in usuarios_ativos})
-    nome_por_login = {u["username"]: u["name"] for u in usuarios_ativos}
+        logins_escolhidos = st.multiselect(
+            "Logins que participarão da conferência",
+            options=logins_disponiveis,
+            default=logins_disponiveis,
+            help="As O.S. serão distribuídas ciclicamente entre os logins selecionados.",
+        )
 
-    logins_escolhidos = st.multiselect(
-        "Logins que participarão da conferência",
-        options=logins_disponiveis,
-        default=logins_disponiveis,
-        help="As O.S. serão distribuídas ciclicamente entre os logins selecionados.",
-    )
+        st.caption("Fallback por **nome** (apenas se você não quiser distribuir por login).")
+        qtd = st.number_input("Número de atendentes (fallback por nome)", 1, 200, 3)
+        nomes_raw = st.text_area(
+            "Nomes (1 por linha ou separados por , ; ) — usado apenas no fallback",
+            value="",
+        )
 
-    st.caption("Fallback por **nome** (apenas se você não quiser distribuir por login).")
-    qtd = st.number_input("Número de atendentes (fallback por nome)", 1, 200, 3)
-    nomes_raw = st.text_area(
-        "Nomes (1 por linha ou separados por , ; ) — usado apenas no fallback",
-        value="",
-    )
+        if "Login atendente" not in out.columns and logins_escolhidos:
+            import numpy as _np
+            bloco = int(_np.ceil(len(out) / max(1, len(logins_escolhidos))))
+            logins_alocados = (logins_escolhidos * bloco)[: len(out)]
+            out.insert(0, "Login atendente", logins_alocados)
+            out.insert(1, "Atendente designado", [nome_por_login.get(l, l) for l in logins_alocados])
 
-    if "Login atendente" not in out.columns and logins_escolhidos:
-        import numpy as _np
-        bloco = int(_np.ceil(len(out) / max(1, len(logins_escolhidos))))
-        logins_alocados = (logins_escolhidos * bloco)[: len(out)]
-        out.insert(0, "Login atendente", logins_alocados)
-        out.insert(1, "Atendente designado", [nome_por_login.get(l, l) for l in logins_alocados])
+        if "Atendente designado" not in out.columns:
+            import re as _re, numpy as _np
+            nomes = [n.strip() for n in _re.split(r"[,;\n]+", nomes_raw) if n.strip()]
+            if not nomes:
+                nomes = [f"Atendente {i+1}" for i in range(int(qtd))]
+            else:
+                while len(nomes) < int(qtd):
+                    nomes.append(f"Atendente {len(nomes)+1}")
+            bloco = int(_np.ceil(len(out) / len(nomes)))
+            out.insert(0, "Atendente designado", (nomes * bloco)[: len(out)])
 
-    if "Atendente designado" not in out.columns:
-        import re as _re, numpy as _np
-        nomes = [n.strip() for n in _re.split(r"[,;\n]+", nomes_raw) if n.strip()]
-        if not nomes:
-            nomes = [f"Atendente {i+1}" for i in range(int(qtd))]
-        else:
-            while len(nomes) < int(qtd):
-                nomes.append(f"Atendente {len(nomes)+1}")
-        bloco = int(_np.ceil(len(out) / len(nomes)))
-        out.insert(0, "Atendente designado", (nomes * bloco)[: len(out)])
+        if "Login atendente" not in out.columns:
+            rev_login_por_nome = {v: k for k, v in nome_por_login.items()}
+            out.insert(0, "Login atendente", [rev_login_por_nome.get(str(n), "") for n in out["Atendente designado"]])
+        # ------------------------------------------------------------------------------------
 
-    if "Login atendente" not in out.columns:
-        rev_login_por_nome = {v: k for k, v in nome_por_login.items()}
-        out.insert(0, "Login atendente", [rev_login_por_nome.get(str(n), "") for n in out["Atendente designado"]])
-    # ------------------------------------------------------------------------------------
+        # guarda OUT na sessão para permitir reatribuições no Módulo 2
+        st.session_state["out_df"] = out
 
-    # guarda OUT na sessão para permitir reatribuições no Módulo 2
-    st.session_state["out_df"] = out
+        st.success("Pré-análise concluída.")
+        st.dataframe(out, use_container_width=True)
 
-    st.success("Pré-análise concluída.")
-    st.dataframe(out, use_container_width=True)
+        # Exportar planilha da pré-análise
+        buf_pre = io.BytesIO()
+        with pd.ExcelWriter(buf_pre, engine="openpyxl") as w:
+            out.to_excel(w, index=False, sheet_name="Resultado")
+        st.download_button(
+            "⬇️ Baixar Excel — Pré-análise",
+            data=buf_pre.getvalue(),
+            file_name="resultado_no_show.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
 
-    # Exportar planilha da pré-análise
-    buf_pre = io.BytesIO()
-    with pd.ExcelWriter(buf_pre, engine="openpyxl") as w:
-        out.to_excel(w, index=False, sheet_name="Resultado")
-    st.download_button(
-        "⬇️ Baixar Excel — Pré-análise",
-        data=buf_pre.getvalue(),
-        file_name="resultado_no_show.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
+        # Publicar para o Módulo 2 (persistência compartilhada)
+        st.markdown("#### Publicar para conferência")
+        if st.button("📤 Publicar dataset da pré-análise"):
+            try:
+                import os
+                os.makedirs("data", exist_ok=True)
+                out.to_parquet("data/pre_analise_publicada.parquet", index=False)
+                st.success("✅ Dataset publicado em `data/pre_analise_publicada.parquet`.")
+            except Exception as e:
+                st.error(f"Falha ao publicar: {e}")
 
 # ============================================================
 # MÓDULO 2 — Conferência (sem dupla checagem)
@@ -375,11 +390,15 @@ if file:
 st.markdown("---")
 st.header("Módulo 2 — Conferência (sem dupla checagem)")
 
-# carrega o OUT mais recente da sessão (se houver)
-if "out_df" in st.session_state:
-    out = st.session_state["out_df"]
+# 1) reaproveita DF desta sessão; 2) fallback: parquet publicado pelo Admin
+out = st.session_state.get("out_df")
+if out is None:
+    try:
+        out = pd.read_parquet("data/pre_analise_publicada.parquet")
+    except Exception:
+        out = None
 
-if "out" in locals() and out is not None:
+if out is not None:
 
     # ================== Bulk reassignment (ADMIN) ==================
     if role == "admin" and "Login atendente" in out.columns:
@@ -615,20 +634,15 @@ if "out" in locals() and out is not None:
         help="Exporta a conferência do atendente com a máscara conferida e a validação automática.",
     )
 else:
-    st.info("Realize a **Pré-análise** no Módulo 1 para habilitar a Conferência.")
+    st.info("Não há pré-análise disponível. Peça para o **Admin** publicar no Módulo 1.")
 
 # =========================
-# Admin — Usuários (isolado em função)
+# Admin — Usuários (somente Admin)
 # =========================
-from backend.repo_users import (
-    list_users, create_user, set_password, set_active,
-)
-
 def render_admin_users():
     st.markdown("---")
     st.header("Admin — Usuários")
 
-    # Cria os tabs apenas aqui, dentro da função
     tab_listar, tab_criar, tab_senha, tab_status = st.tabs(
         ["👥 Listar", "➕ Criar", "🔑 Trocar senha", "🚦 Ativar/Desativar"]
     )
@@ -703,10 +717,6 @@ def render_admin_users():
                 else:
                     st.success("Status atualizado.")
 
-# ===== chamada protegida por papel =====
-st.markdown("---")
-st.header("Admin — Usuários")
+# Chamada protegida
 if role == "admin":
     render_admin_users()
-else:
-    st.info("Área restrita ao administrador.")
