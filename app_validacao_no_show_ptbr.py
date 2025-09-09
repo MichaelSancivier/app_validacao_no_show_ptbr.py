@@ -618,23 +618,22 @@ else:
     st.info("Realize a **Pré-análise** no Módulo 1 para habilitar a Conferência.")
 
 # =========================
-# Admin — Usuários
+# Admin — Usuários (isolado em função)
 # =========================
 from backend.repo_users import (
     list_users, create_user, set_password, set_active,
 )
 
-st.markdown("---")
-st.header("Admin — Usuários")
+def render_admin_users():
+    st.markdown("---")
+    st.header("Admin — Usuários")
 
-if role != "admin":
-    st.info("Área restrita ao administrador.")
-else:
+    # Cria os tabs apenas aqui, dentro da função
     tab_listar, tab_criar, tab_senha, tab_status = st.tabs(
         ["👥 Listar", "➕ Criar", "🔑 Trocar senha", "🚦 Ativar/Desativar"]
     )
 
-    # Listagem
+    # ------------ Listar ------------
     with tab_listar:
         include_inactive = st.checkbox("Mostrar inativos", value=True, key="adm_list_inativos")
         users_df = pd.DataFrame(list_users(include_inactive=include_inactive))
@@ -642,7 +641,7 @@ else:
             users_df = users_df.sort_values(["active", "username"], ascending=[False, True])
         st.dataframe(users_df, use_container_width=True)
 
-    # Criar usuário
+    # ------------ Criar ------------
     with tab_criar:
         st.caption("Crie logins de atendentes (ou outro admin). A senha será mostrada uma única vez.")
         c1, c2 = st.columns(2)
@@ -669,7 +668,7 @@ else:
                     key="adm_dl_creds",
                 )
 
-    # Trocar senha
+    # ------------ Trocar senha ------------
     with tab_senha:
         ulist = [u["username"] for u in list_users()]
         if not ulist:
@@ -685,7 +684,7 @@ else:
                 else:
                     st.success("Senha atualizada.")
 
-    # Ativar / Desativar
+    # ------------ Ativar / Desativar ------------
     with tab_status:
         users_all = list_users(include_inactive=True)
         if not users_all:
@@ -693,8 +692,9 @@ else:
         else:
             u_sel = st.selectbox("Usuário", [u["username"] for u in users_all], key="adm_sel_user_status")
             ativo_atual = next((int(u["active"]) for u in users_all if u["username"] == u_sel), 1)
-            novo_status = st.selectbox("Status", ["Ativo", "Inativo"],
-                                       index=0 if ativo_atual else 1, key="adm_sel_status")
+            novo_status = st.selectbox(
+                "Status", ["Ativo", "Inativo"], index=0 if ativo_atual else 1, key="adm_sel_status"
+            )
             if st.button("Aplicar status", key="adm_btn_status"):
                 try:
                     set_active(u_sel, 1 if novo_status == "Ativo" else 0)
@@ -703,40 +703,10 @@ else:
                 else:
                     st.success("Status atualizado.")
 
-
-    # --- Trocar senha ----------------------------------------------------------
-with tabs[2]:
-    ulist = [u["username"] for u in list_users()]
-    if not ulist:
-        st.info("Sem usuários.")
-    else:
-        u_sel = st.selectbox("Usuário", ulist, key="admin_pwd_user")
-        new_pwd = st.text_input("Nova senha", type="password", key="admin_pwd_new")
-        if st.button("Alterar senha", key="admin_pwd_btn"):
-            try:
-                set_password(u_sel, new_pwd)
-            except Exception as e:
-                st.error(f"Erro: {e}")
-            else:
-                st.success("Senha atualizada.")
-
-# --- Ativar / Desativar ---------------------------------------------------
-with tabs[3]:
-    users_all = list_users(include_inactive=True)
-    if not users_all:
-        st.info("Sem usuários.")
-    else:
-        u_sel2 = st.selectbox("Usuário", [u["username"] for u in users_all], key="admin_status_user")
-        ativo_atual = next((int(u["active"]) for u in users_all if u["username"] == u_sel2), 1)
-        novo_status = st.selectbox(
-            "Status", ["Ativo", "Inativo"],
-            index=0 if ativo_atual else 1,
-            key="admin_status_sel",
-        )
-        if st.button("Aplicar status", key="admin_status_btn"):
-            try:
-                set_active(u_sel2, 1 if novo_status == "Ativo" else 0)
-            except Exception as e:
-                st.error(f"Erro: {e}")
-            else:
-                st.success("Status atualizado.")
+# ===== chamada protegida por papel =====
+st.markdown("---")
+st.header("Admin — Usuários")
+if role == "admin":
+    render_admin_users()
+else:
+    st.info("Área restrita ao administrador.")
