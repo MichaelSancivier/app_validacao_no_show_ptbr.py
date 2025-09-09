@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
-from typing import Tuple
 
 import bcrypt
 import streamlit as st
 
 from backend.repo_users import credentials_from_db, ensure_bootstrap_admin
+
+# Ligue para ver informações de diagnóstico na lateral
+DEBUG_AUTH = False
 
 
 # -----------------------------
@@ -71,6 +73,7 @@ def _persist_bootstrap_password(pwd: str):
         with open(os.path.join("data", "ADMIN_BOOTSTRAP.txt"), "w", encoding="utf-8") as f:
             f.write(f"usuario: admin\nsenha: {pwd}\n")
     except Exception:
+        # ambiente read-only? ok, seguimos
         pass
 
 
@@ -109,11 +112,11 @@ def _fallback_manual_login(cfg: dict):
     """
     Formulário com st.form que valida usuário/senha (bcrypt)
     e mantém sessão em st.session_state. O st.form evita reruns
-    no meio do submit, deixando o login 100% confiável.
+    no meio do submit, deixando o login confiável.
     """
     st.subheader("Login")
 
-    users = cfg["credentials"]["usernames"]
+    users = cfg["credentials"].get("usernames", {})
 
     # FORM: o rerun só acontece após o submit
     with st.form("compat_login", clear_on_submit=False):
@@ -121,22 +124,52 @@ def _fallback_manual_login(cfg: dict):
         p = st.text_input("Password", type="password", key="fb_pass")
         submitted = st.form_submit_button("Entrar")
 
+    if DEBUG_AUTH:
+        st.sidebar.caption(f"[DEBUG] submitted={submitted} users_keys={list(users.keys())[:5]}...")
+
     if submitted:
+        u = (u or "").strip()
+        p = (p or "").strip()
+
         if u in users:
+            # pega o hash guardado (aceita vários nomes)
+            stored = (
+                users[u].get("password")
+                or users[u].get("hashed_password")
+                or users[u].get("pass")
+            )
+
+            if stored is None:
+                st.error("Credencial sem hash de senha no banco.")
+                if DEBUG_AUTH:
+                    st.sidebar.error("[DEBUG] stored hash ausente")
+                return None, None, None, None
+
+            # normaliza para bytes
             try:
-                ok = bcrypt.checkpw(p.encode("utf-8"), users[u]["password"].encode("utf-8"))
-            except Exception:
+                stored_b = stored if isinstance(stored, (bytes, bytearray)) else str(stored).encode("utf-8")
+                ok = bcrypt.checkpw(p.encode("utf-8"), stored_b)
+            except Exception as e:
                 ok = False
+                if DEBUG_AUTH:
+                    st.sidebar.error(f"[DEBUG] bcrypt.checkpw error: {e}")
+
             if ok:
                 st.session_state["_auth_ok"] = True
                 st.session_state["_auth_user"] = u
-                st.session_state["_auth_name"] = users[u]["name"]
+                st.session_state["_auth_name"] = users[u].get("name", u)
                 st.session_state["_auth_role"] = users[u].get("role", "atendente")
+                if DEBUG_AUTH:
+                    st.sidebar.success(f"[DEBUG] login OK user={u}")
                 _rerun()
             else:
                 st.error("Usuário/senha inválidos.")
+                if DEBUG_AUTH:
+                    st.sidebar.error(f"[DEBUG] senha inválida para {u}")
         else:
             st.error("Usuário não encontrado.")
+            if DEBUG_AUTH:
+                st.sidebar.error(f"[DEBUG] usuário '{u}' não encontrado")
 
     if st.session_state.get("_auth_ok"):
         return True, st.session_state["_auth_user"], st.session_state["_auth_name"], st.session_state["_auth_role"]
