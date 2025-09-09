@@ -9,7 +9,7 @@ def _load_auth_config():
     if "auth" in st.secrets:
         return st.secrets["auth"]
 
-    # DEV: só tenta ler auth.yaml se o arquivo existir
+    # DEV (opcional): só tenta auth.yaml se existir localmente
     if os.path.exists("auth.yaml"):
         try:
             import yaml
@@ -19,7 +19,6 @@ def _load_auth_config():
         except Exception as e:
             raise RuntimeError(f"Falha ao ler auth.yaml: {e}")
 
-    # Se não houver secrets nem auth.yaml
     raise RuntimeError(
         "Config de autenticação não encontrada. "
         "Defina st.secrets['auth'] no Streamlit Cloud (Settings → Secrets)."
@@ -27,13 +26,15 @@ def _load_auth_config():
 
 def login():
     cfg = _load_auth_config()
+
+    # 👇 NOVO: sem 'preauthorized'
     authenticator = stauth.Authenticate(
         cfg["credentials"],
         cfg["cookie"]["name"],
         cfg["cookie"]["key"],
         cfg["cookie"]["expiry_days"],
-        cfg.get("preauthorized", {})
     )
+
     name, auth_status, username = authenticator.login("Login", "main")
     role = None
     if auth_status:
