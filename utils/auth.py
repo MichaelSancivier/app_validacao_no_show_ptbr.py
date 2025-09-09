@@ -1,16 +1,29 @@
+# utils/auth.py
 from __future__ import annotations
+import os
 import streamlit as st
-import yaml
-from yaml.loader import SafeLoader
 import streamlit_authenticator as stauth
 
 def _load_auth_config():
-    # 1º: tenta Streamlit Secrets (produção)
+    # PRODUÇÃO: usa st.secrets (Streamlit Cloud)
     if "auth" in st.secrets:
         return st.secrets["auth"]
-    # 2º: fallback DEV (opcional, local) -> auth.yaml (NÃO subir no GitHub)
-    with open("auth.yaml", "r", encoding="utf-8") as f:
-        return yaml.load(f, Loader=SafeLoader)
+
+    # DEV: só tenta ler auth.yaml se o arquivo existir
+    if os.path.exists("auth.yaml"):
+        try:
+            import yaml
+            from yaml.loader import SafeLoader
+            with open("auth.yaml", "r", encoding="utf-8") as f:
+                return yaml.load(f, Loader=SafeLoader)
+        except Exception as e:
+            raise RuntimeError(f"Falha ao ler auth.yaml: {e}")
+
+    # Se não houver secrets nem auth.yaml
+    raise RuntimeError(
+        "Config de autenticação não encontrada. "
+        "Defina st.secrets['auth'] no Streamlit Cloud (Settings → Secrets)."
+    )
 
 def login():
     cfg = _load_auth_config()
