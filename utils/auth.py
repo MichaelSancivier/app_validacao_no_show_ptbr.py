@@ -2,19 +2,17 @@
 from __future__ import annotations
 
 import os
-import inspect
 from collections.abc import Mapping
 from typing import Tuple
 
 import bcrypt
 import streamlit as st
-import streamlit_authenticator as stauth
 
 from backend.repo_users import credentials_from_db, ensure_bootstrap_admin
 
 
 # -----------------------------
-# Util: rerun compatível (v1.4x+)
+# Util: rerun compatível
 # -----------------------------
 def _rerun():
     try:
@@ -27,7 +25,7 @@ def _rerun():
 
 
 # -----------------------------
-# Helpers de configuração
+# Helpers
 # -----------------------------
 def _deep_to_dict(obj):
     if isinstance(obj, Mapping):
@@ -37,23 +35,11 @@ def _deep_to_dict(obj):
     return obj
 
 
-def _cookie_cfg() -> Tuple[str, str, int]:
-    """
-    Lê a config de cookie dos Secrets (se existir).
-    Caso contrário, usa defaults seguros (troque a key em produção!).
-    """
-    if "auth" in st.secrets and "cookie" in st.secrets["auth"]:
-        c = _deep_to_dict(st.secrets["auth"]["cookie"])
-        return c["name"], c["key"], c["expiry_days"]
-    # defaults
-    return "vns_auth", "mude_esta_chave_em_prod", 14
-
-
 def _show_bootstrap_banner(password: str):
     """
     Mostra um aviso persistente com a senha do admin.
-    - Repete em cada rerun até o usuário marcar "Já copiei/ocultar".
-    - Oferece download das credenciais em admin.txt.
+    Fica visível até marcar "Já copiei / ocultar".
+    Disponibiliza download de admin.txt.
     """
     if st.session_state.get("_hide_bootstrap_banner"):
         return
@@ -78,97 +64,53 @@ def _show_bootstrap_banner(password: str):
 
 
 def _persist_bootstrap_password(pwd: str):
-    """
-    Persiste a senha:
-    - na sessão (para manter o banner visível entre reruns)
-    - opcionalmente em arquivo local (se o sistema permitir)
-    """
+    """Guarda a senha de bootstrap na sessão e tenta salvar em data/ADMIN_BOOTSTRAP.txt."""
     st.session_state["_bootstrap_admin_pwd"] = pwd
     try:
         os.makedirs("data", exist_ok=True)
         with open(os.path.join("data", "ADMIN_BOOTSTRAP.txt"), "w", encoding="utf-8") as f:
             f.write(f"usuario: admin\nsenha: {pwd}\n")
     except Exception:
-        # Ambiente pode ser read-only no momento do bootstrap; ignoramos.
         pass
 
 
 def _load_auth_config() -> dict:
     """
-    Carrega credenciais (prioriza SQLite).
-    Se não houver usuários, cria o admin inicial (bootstrap) e **mostra aviso persistente**.
-    Como fallback opcional, aceita Secrets['auth'].
+    Carrega credenciais a partir do SQLite.
+    Se não houver usuários, cria o admin inicial e mostra um banner persistente.
+    (Sem cookies; não usa streamlit_authenticator.)
     """
-    # Se já temos uma senha de bootstrap na sessão, reexibimos o banner
+    # Reexibe banner se já houver senha na sessão
     if "_bootstrap_admin_pwd" in st.session_state:
         _show_bootstrap_banner(st.session_state["_bootstrap_admin_pwd"])
 
-    # 1) Banco (preferido)
+    # 1) Banco
     from_db = credentials_from_db()
     if from_db:
-        name, key, days = _cookie_cfg()
-        return {"credentials": from_db, "cookie": {"name": name, "key": key, "expiry_days": days}}
+        return {"credentials": from_db}
 
-    # 2) Bootstrap do admin se banco está vazio
+    # 2) Bootstrap admin e recarrega
     first_pwd = ensure_bootstrap_admin()
     if first_pwd:
         _persist_bootstrap_password(first_pwd)
         _show_bootstrap_banner(first_pwd)
         from_db = credentials_from_db()
         if from_db:
-            name, key, days = _cookie_cfg()
-            return {"credentials": from_db, "cookie": {"name": name, "key": key, "expiry_days": days}}
+            return {"credentials": from_db}
 
-    # 3) Fallback opcional — Secrets
-    if "auth" in st.secrets:
-        return _deep_to_dict(st.secrets["auth"])
-
-    raise RuntimeError("Sem configuração de autenticação e sem usuários no banco.")
+    # 3) Sem credenciais
+    raise RuntimeError("Sem usuários no banco. Use o bloque 'Setup rápido' para criar o admin.")
 
 
 # -----------------------------
-# Bind do streamlit_authenticator
-# -----------------------------
-def _call_login_compat(authenticator: stauth.Authenticate):
-    """
-    Chama .login() do streamlit_authenticator e normaliza o retorno
-    para (name, auth_status, username), independente de versão.
-    """
-    try:
-        params = inspect.signature(authenticator.login).parameters
-    except Exception:
-        params = {}
-
-    if "location" in params and "form_name" not in params:
-        try:
-            from streamlit_authenticator.utilities.constants import Location
-            res = authenticator.login(location=Location.MAIN)
-        except Exception:
-            res = authenticator.login(location="main")
-    else:
-        res = authenticator.login("Login", "main")
-
-    # Versões antigas retornam tuple(name, auth_status, username)
-    if isinstance(res, tuple) and len(res) == 3:
-        return res
-
-    # Versões novas retornam um objeto com atributos
-    name = getattr(res, "name", None)
-    auth_status = getattr(res, "authentication_status", getattr(res, "auth_status", None))
-    username = getattr(res, "username", None)
-    return name, auth_status, username
-
-
-# -----------------------------
-# Fallback manual (sem cookies)
+# Login compatibilidade (sem cookies)
 # -----------------------------
 def _fallback_manual_login(cfg: dict):
     """
-    Formulário simples que valida usuário/senha com bcrypt,
-    sem depender do componente de cookies (extra-streamlit-components).
-    Usa st.session_state para manter a sessão.
+    Formulário simples que valida usuário/senha com bcrypt
+    e mantém sessão em st.session_state.
     """
-    st.subheader("Login (modo compatibilidade)")
+    st.subheader("Login")
     users = cfg["credentials"]["usernames"]
 
     u = st.text_input("Username", key="fb_user")
@@ -196,7 +138,7 @@ def _fallback_manual_login(cfg: dict):
 
 
 class _DummyAuth:
-    """Compatível com app.logout(...). Limpa a sessão do fallback."""
+    """Objeto com .logout() compatível com o app (aceita *args, **kwargs)."""
 
     def logout(self, *args, **kwargs):
         for k in ("_auth_ok", "_auth_user", "_auth_name", "_auth_role"):
@@ -211,38 +153,13 @@ def login():
     """
     Retorna: (authenticator, auth_status, username, name, role)
 
-    Fluxo:
-    1) Tenta o login oficial do streamlit_authenticator (com cookies).
-    2) Se não logar (status None) ou der erro, exibe o fallback manual.
+    Aqui mostramos **apenas** o login em modo compatibilidade.
+    Não usamos streamlit_authenticator nem cookies.
     """
     cfg = _load_auth_config()
 
-    # 1) Tenta o fluxo oficial com cookies
-    authenticator = None
-    try:
-        authenticator = stauth.Authenticate(
-            cfg["credentials"],
-            cfg["cookie"]["name"],
-            cfg["cookie"]["key"],
-            cfg["cookie"]["expiry_days"],
-        )
-        name, auth_status, username = _call_login_compat(authenticator)
-    except Exception:
-        name = username = None
-        auth_status = None
-
-    # Se logou normalmente, retorna
-    if auth_status:
-        role = cfg["credentials"]["usernames"][username].get("role", "atendente")
-        return authenticator, auth_status, username, name, role
-
-    # 2) Fallback manual
-    st.divider()
-    st.caption("⚠️ Problemas para entrar? Use o **modo compatibilidade** abaixo.")
     ok, u, n, r = _fallback_manual_login(cfg)
     if ok:
-        # Usa o DummyAuth para ter .logout() compatível com o app
         return _DummyAuth(), True, u, n, r
 
-    # Ainda não logado
-    return authenticator or _DummyAuth(), None, None, None, None
+    return _DummyAuth(), None, None, None, None
