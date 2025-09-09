@@ -662,35 +662,39 @@ else:
                     mime="text/plain",
                 )
 
-    # Trocar senha
-    with tabs[2]:
-        ulist = [u["username"] for u in list_users()]
-        if not ulist:
-            st.info("Sem usuários.")
-        else:
-            u_sel = st.selectbox("Usuário", ulist)
-            new_pwd = st.text_input("Nova senha", type="password")
-            if st.button("Alterar senha"):
-                try:
-                    set_password(u_sel, new_pwd)
-                except Exception as e:
-                    st.error(f"Erro: {e}")
-                else:
-                    st.success("Senha atualizada.")
+    # --- Trocar senha ----------------------------------------------------------
+with tabs[2]:
+    ulist = [u["username"] for u in list_users()]
+    if not ulist:
+        st.info("Sem usuários.")
+    else:
+        u_sel = st.selectbox("Usuário", ulist, key="admin_pwd_user")
+        new_pwd = st.text_input("Nova senha", type="password", key="admin_pwd_new")
+        if st.button("Alterar senha", key="admin_pwd_btn"):
+            try:
+                set_password(u_sel, new_pwd)
+            except Exception as e:
+                st.error(f"Erro: {e}")
+            else:
+                st.success("Senha atualizada.")
 
-    # Ativar / Desativar
-    with tabs[3]:
-        users_all = list_users(include_inactive=True)
-        if not users_all:
-            st.info("Sem usuários.")
-        else:
-            u_sel = st.selectbox("Usuário", [u["username"] for u in users_all])
-            ativo_atual = next((int(u["active"]) for u in users_all if u["username"] == u_sel), 1)
-            novo_status = st.selectbox("Status", ["Ativo", "Inativo"], index=0 if ativo_atual else 1)
-            if st.button("Aplicar status"):
-                try:
-                    set_active(u_sel, 1 if novo_status == "Ativo" else 0)
-                except Exception as e:
-                    st.error(f"Erro: {e}")
-                else:
-                    st.success("Status atualizado.")
+# --- Ativar / Desativar ---------------------------------------------------
+with tabs[3]:
+    users_all = list_users(include_inactive=True)
+    if not users_all:
+        st.info("Sem usuários.")
+    else:
+        u_sel2 = st.selectbox("Usuário", [u["username"] for u in users_all], key="admin_status_user")
+        ativo_atual = next((int(u["active"]) for u in users_all if u["username"] == u_sel2), 1)
+        novo_status = st.selectbox(
+            "Status", ["Ativo", "Inativo"],
+            index=0 if ativo_atual else 1,
+            key="admin_status_sel",
+        )
+        if st.button("Aplicar status", key="admin_status_btn"):
+            try:
+                set_active(u_sel2, 1 if novo_status == "Ativo" else 0)
+            except Exception as e:
+                st.error(f"Erro: {e}")
+            else:
+                st.success("Status atualizado.")
