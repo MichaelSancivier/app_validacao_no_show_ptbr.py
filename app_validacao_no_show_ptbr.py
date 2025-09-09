@@ -4,24 +4,21 @@ from __future__ import annotations
 
 import io
 import re
-from datetime import datetime
 import uuid
+from datetime import datetime
 
 import numpy as np
 import pandas as pd
 import streamlit as st
 import unicodedata
-from backend.repo_users import list_users  # acabei de incluir.
 
-
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-# Login + sessão estável (SID) + banco
-# (requer utils/auth.py e backend/db.py do pacote que preparamos)
+# ---------- Infra: login / sessão / banco ----------
 from backend.db import init_db
 from utils.auth import sticky_sid_bootstrap, login
-from backend.repo_reviews import upsert_reviews_from_df, list_all_reviews_df  # <-- persistência
+from backend.repo_reviews import upsert_reviews_from_df, list_all_reviews_df
+from backend.repo_users import list_users  # usado na distribuição por login
 
-# Inicializa SQLite e tabelas (evita "no such table: users")
+# Inicializa SQLite e tabelas (evita "no such table")
 init_db()
 
 # Restaura SID via ?sid=... e fixa no URL para não cair a cada clique
@@ -30,7 +27,7 @@ sticky_sid_bootstrap()
 # Executa login (mostra o formulário se não estiver logado)
 authenticator, ok, username, name, role = login()
 if not ok:
-    st.stop()  # só continua o app quando estiver logado
+    st.stop()
 
 # Barra lateral com info + sair
 with st.sidebar:
@@ -38,7 +35,6 @@ with st.sidebar:
     if st.button("Sair"):
         authenticator.logout()
         st.stop()
-# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
 
 # ============================================================
@@ -257,15 +253,7 @@ if file:
         help="Se esta coluna contiver qualquer um dos gatilhos, a linha vira 'No-show Cliente' por regra especial.",
     )
 
-    # Alocação de atendentes
-    st.markdown("#### Alocação de atendentes (opcional)")
-    qtd = st.number_input("Número de atendentes", 1, 200, 3, help="Usado para distribuir a fila caso o arquivo não traga os nomes.")
-    nomes_raw = st.text_area(
-        "Nomes (1 por linha ou separados por , ; )",
-        value="",
-        help="Se deixar vazio, o app gera nomes 'Atendente 1', 'Atendente 2' ...",
-    )
-
+    # --- processamento ---
     resultados, detalhes = [], []
     causas, motivos, mascaras_preenchidas = [], [], []
     combos, mascaras_modelo = [], []
@@ -337,18 +325,57 @@ if file:
             resultado_no_show.append("No-show Técnico")
     out["Resultado No Show"] = resultado_no_show
 
-    # Distribuição (se não existir coluna pronta)
-    if "Atendente designado" not in out.columns:
-        import re as _re
+    # -------------------- Distribuição por LOGIN (com fallback por nome) --------------------
+    st.markdown("#### Alocação de atendentes")
 
+    # Logins ativos (papel atendente)
+    usuarios_ativos = [
+        u for u in list_users(include_inactive=False)
+        if u.get("role") == "atendente" and int(u.get("active", 0)) == 1
+    ]
+    logins_disponiveis = sorted({u["username"] for u in usuarios_ativos})
+    nome_por_login = {u["username"]: u["name"] for u in usuarios_ativos}
+
+    logins_escolhidos = st.multiselect(
+        "Logins que participarão da conferência",
+        options=logins_disponiveis,
+        default=logins_disponiveis,
+        help="As O.S. serão distribuídas ciclicamente entre os logins selecionados.",
+    )
+
+    st.caption("Fallback por **nome** (use somente se não quiser distribuir por login).")
+    qtd = st.number_input("Número de atendentes (fallback por nome)", 1, 200, 3)
+    nomes_raw = st.text_area(
+        "Nomes (1 por linha ou separados por , ; ) — usado apenas no fallback",
+        value="",
+    )
+
+    # Prioridade: se houver logins -> cria 'Login atendente' e 'Atendente designado'
+    if "Login atendente" not in out.columns and logins_escolhidos:
+        import numpy as _np
+        bloco = int(_np.ceil(len(out) / max(1, len(logins_escolhidos))))
+        logins_alocados = (logins_escolhidos * bloco)[: len(out)]
+        out.insert(0, "Login atendente", logins_alocados)
+        out.insert(1, "Atendente designado", [nome_por_login.get(l, l) for l in logins_alocados])
+
+    # Se não deu por login e não existe 'Atendente designado', usa fallback por NOME
+    if "Atendente designado" not in out.columns:
+        import re as _re, numpy as _np
         nomes = [n.strip() for n in _re.split(r"[,;\n]+", nomes_raw) if n.strip()]
         if not nomes:
             nomes = [f"Atendente {i+1}" for i in range(int(qtd))]
         else:
             while len(nomes) < int(qtd):
                 nomes.append(f"Atendente {len(nomes)+1}")
-        bloco = int(np.ceil(len(out) / len(nomes)))
+        bloco = int(_np.ceil(len(out) / len(nomes)))
         out.insert(0, "Atendente designado", (nomes * bloco)[: len(out)])
+
+    # Se já existe 'Atendente designado' mas ainda não existe 'Login atendente',
+    # tenta derivar o login pelo nome (quando houver correspondência exata).
+    if "Login atendente" not in out.columns:
+        rev_login_por_nome = {v: k for k, v in nome_por_login.items()}
+        out.insert(0, "Login atendente", [rev_login_por_nome.get(str(n), "") for n in out["Atendente designado"]])
+    # ----------------------------------------------------------------------------------------
 
     st.success("Pré-análise concluída.")
     st.dataframe(out, use_container_width=True)
@@ -373,20 +400,35 @@ st.header("Módulo 2 — Conferência (sem dupla checagem)")
 if "out" in locals() and out is not None:
     st.markdown("### Conferência por atendente")
 
-    # --- visibilidade por papel (admin escolhe; atendente vê só o próprio)
-    if role == "admin":
-        nome_atendente = st.selectbox(
-            "Selecione seu nome",
-            options=sorted(out["Atendente designado"].astype(str).unique()),
-            help="Admin pode escolher qualquer atendente para conferir."
-        )
-    else:
-        # usa o username (login) como nome do atendente
-        nome_atendente = (username or st.session_state.get("_auth_user", "") or "").strip()
-        st.info(f"Você está conferindo as O.S. de **{nome_atendente or '—'}**.")
+    # Filtra por LOGIN se a coluna existe; senão, por nome (fallback)
+    filtra_por_login = "Login atendente" in out.columns
 
-    df_atendente = out[out["Atendente designado"].astype(str) == str(nome_atendente)].copy()
-    st.markdown(f"**Total de registros para {nome_atendente or '—'}:** {len(df_atendente)}")
+    if filtra_por_login:
+        if role == "admin":
+            login_sel = st.selectbox(
+                "Selecione o login",
+                options=sorted(out["Login atendente"].astype(str).unique()),
+                help="Admin pode escolher qualquer login."
+            )
+        else:
+            login_sel = (username or st.session_state.get("_auth_user", "") or "").strip()
+            st.info(f"Você está conferindo as O.S. do login **{login_sel or '—'}**.")
+        df_atendente = out[out["Login atendente"].astype(str) == str(login_sel)].copy()
+        nome_mostrar = df_atendente.get("Atendente designado", pd.Series(["—"])).iloc[0] if not df_atendente.empty else login_sel
+        st.markdown(f"**Total de registros (login {login_sel} / {nome_mostrar}):** {len(df_atendente)}")
+    else:
+        # fallback por nome
+        if role == "admin":
+            nome_atendente = st.selectbox(
+                "Selecione seu nome",
+                options=sorted(out["Atendente designado"].astype(str).unique()),
+                help="Admin pode escolher qualquer atendente para conferir."
+            )
+        else:
+            nome_atendente = (username or st.session_state.get("_auth_user", "") or "").strip()
+            st.info(f"Você está conferindo as O.S. de **{nome_atendente or '—'}**.")
+        df_atendente = out[out["Atendente designado"].astype(str) == str(nome_atendente)].copy()
+        st.markdown(f"**Total de registros para {nome_atendente or '—'}:** {len(df_atendente)}")
 
     # Garante colunas de conferência
     for col in [
@@ -422,7 +464,6 @@ if "out" in locals() and out is not None:
         st.markdown(f"**Classificação pré-análise:** {row.get('Classificação No-show', '')}")
         st.markdown(f"**Resultado No Show (app):** {row.get('Resultado No Show', '')}")
 
-        # --- Detalhe / regra especial
         detalhe_app = str(row.get("Detalhe", "")).strip()
         df_atendente.at[i, "Detalhe (app)"] = detalhe_app
         is_regra_especial = "regra especial aplicada" in detalhe_app.lower()
@@ -434,11 +475,7 @@ if "out" in locals() and out is not None:
                 st.info(f"**Detalhe do app:** {detalhe_app}")
 
         # Modelo oficial:
-        if is_regra_especial:
-            modelo_oficial = "No-show Cliente"
-        else:
-            modelo_oficial = str(row.get("Máscara prestador", "")).strip()
-
+        modelo_oficial = "No-show Cliente" if is_regra_especial else str(row.get("Máscara prestador", "")).strip()
         st.markdown(f"**Máscara modelo (oficial):** `{modelo_oficial}`")
 
         # Máscara conferida (select + opção texto)
@@ -448,9 +485,8 @@ if "out" in locals() and out is not None:
             options=opcoes_mask,
             key=f"mask_sel_{i}",
             help=(
-                "Escolha a máscara **oficial** gerada pelo app OU selecione **'(Outro texto)'** para digitar uma máscara "
-                "diferente conforme sua verificação no sistema. "
-                "Em caso de **regra especial**, a máscara esperada é **'No-show Cliente'**."
+                "Escolha a máscara oficial gerada pelo app OU selecione '(Outro texto)' para digitar a máscara "
+                "conforme a verificação no sistema."
             ),
         )
         if escolha == "(Outro texto)":
@@ -458,7 +494,6 @@ if "out" in locals() and out is not None:
                 f"Digite a máscara conferida (linha {i})",
                 value=str(row.get("Máscara conferida", "")),
                 key=f"mask_txt_{i}",
-                help="Se escolheu '(Outro texto)', digite aqui a máscara exata que será registrada na O.S.",
             )
         else:
             mask_conf = escolha
@@ -484,21 +519,18 @@ if "out" in locals() and out is not None:
         df_atendente.at[i, "Máscara conferida"] = mask_conf
         df_atendente.at[i, "Validação automática (conferida)"] = validacao
 
-        # Classificação ajustada (pré-seleciona No-show Cliente quando especial)
+        # Classificação ajustada
         if is_regra_especial and "No-show Cliente" in classificacoes:
             idx_default = classificacoes.index("No-show Cliente")
         else:
             idx_default = (
-                classificacoes.index(row.get("Resultado No Show", ""))
-                if row.get("Resultado No Show", "") in classificacoes
-                else 0
+                classificacoes.index(row.get("Resultado No Show", "")) if row.get("Resultado No Show", "") in classificacoes else 0
             )
         df_atendente.at[i, "Classificação ajustada"] = st.selectbox(
             f"Classificação ajustada (linha {i})",
             options=classificacoes,
             index=idx_default,
             key=f"class_{i}",
-            help="Ajuste a classificação final conforme a conferência no sistema (cliente, técnico, erro de agendamento, etc.).",
         )
 
         # Status da conferência (default Pendente; se existir valor, usa-o)
@@ -509,7 +541,6 @@ if "out" in locals() and out is not None:
             options=status_opcoes,
             index=idx_status,
             key=f"status_{i}",
-            help="Registre o desfecho: se o app acertou, se você corrigiu, se houve erro do atendente ou mantenha pendente.",
         )
 
         # Observações
@@ -517,7 +548,6 @@ if "out" in locals() and out is not None:
             f"Observações (linha {i})",
             value=str(row.get("Observações", "")),
             key=f"obs_{i}",
-            help="Use para observações complementares (evidências, contato, RT, etc.).",
         )
 
     # ==== Persistência da conferência no servidor ====
@@ -560,23 +590,21 @@ if "out" in locals() and out is not None:
     buf_conf = io.BytesIO()
     with pd.ExcelWriter(buf_conf, engine="openpyxl") as w:
         df_atendente.to_excel(w, index=False, sheet_name="Conferencia")
-
     st.download_button(
         "⬇️ Baixar Excel — Conferência do atendente",
         data=buf_conf.getvalue(),
-        file_name=f"conferencia_{nome_atendente or 'atendente'}.xlsx",
+        file_name=f"conferencia_{(username or 'atendente')}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         help="Exporta a conferência do atendente com a máscara conferida e a validação automática.",
     )
 else:
     st.info("Realize a **Pré-análise** no Módulo 1 para habilitar a Conferência.")
 
+
 # =========================
 # Admin — Usuários
 # =========================
-from backend.repo_users import (
-    list_users, create_user, set_password, set_active,
-)
+from backend.repo_users import create_user, set_password, set_active  # list_users já importado no topo
 
 st.markdown("---")
 st.header("Admin — Usuários")
@@ -652,4 +680,3 @@ else:
                     st.error(f"Erro: {e}")
                 else:
                     st.success("Status atualizado.")
-
