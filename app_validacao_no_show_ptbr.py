@@ -453,33 +453,29 @@ if "out" in locals() and out is not None:
     st.markdown(f"**Total de registros para {nome_atendente}:** {len(df_atendente)}")
 
     # Garante colunas de conferência
-for col in [
-    "Máscara conferida",
-    "Classificação ajustada",
-    "Status da conferência",
-    "Observações",
-    "Validação automática (conferida)",
-    "Detalhe (app)",
-]:
-    if col not in df_atendente.columns:
-        df_atendente[col] = ""
+    for col in [
+        "Máscara conferida",
+        "Classificação ajustada",
+        "Status da conferência",
+        "Observações",
+        "Validação automática (conferida)",
+        "Detalhe (app)",
+    ]:
+        if col not in df_atendente.columns:
+            df_atendente[col] = ""
 
-# Opções do seletor "Classificação ajustada"
-classificacoes = [
-    "No-show Cliente",
-    "No-show Técnico",
-    "Erro Agendamento",
-    "Falta de equipamentos",
-]
-
-# Opções do seletor "Status da conferência"
-status_opcoes = [
-    "✅ App acertou",
-    "❌ App errou, atendente corrigiu",
-    "⚠️ Atendente errou",
-    "⏳ Pendente",
-]
-
+    classificacoes = [
+        "No-show Cliente",
+        "No-show Técnico",
+        "Erro Agendamento",
+        "Falta de equipamentos",
+    ]
+    status_opcoes = [
+        "✅ App acertou",
+        "❌ App errou, atendente corrigiu",
+        "⚠️ Atendente errou",
+        "⏳ Pendente",
+    ]
 
     # ===== edição linha a linha =====
     for i, row in df_atendente.iterrows():
@@ -593,3 +589,4 @@ status_opcoes = [
     )
 else:
     st.info("Realize a **Pré-análise** no Módulo 1 para habilitar a Conferência.")
+
