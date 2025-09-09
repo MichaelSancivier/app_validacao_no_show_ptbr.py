@@ -4,7 +4,7 @@ Aplicação **Streamlit** para validar **Máscaras de No-show** em ordens de ser
 - **Módulo 1 (Admin):** Pré-análise com regras embutidas + regra especial.
 - **Módulo 2 (Admin/Atendente):** Conferência no app (sem dupla checagem), validação automática da máscara, salvamento no servidor e exportação.
 
-> **Novidades v1.2.1**
+> **Novidades v1.2.0**
 > - **Distribuição por login** (coluna **Login atendente**) com fallback por nome.  
 > - **Reatribuição em massa** (“🔁 Reatribuir O.S. para outro login”) para Admin.  
 > - **Gestão de usuários** no app: criar usuário, trocar senha, ativar/desativar.  
