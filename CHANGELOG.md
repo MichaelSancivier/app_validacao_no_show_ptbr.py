@@ -9,7 +9,7 @@
 
 Todas as mudanças relevantes deste projeto.
 
-## [1.2.1] - 2025-09-09
+## [1.2.0] - 2025-09-09
 ### Adicionado
 - Distribuição por **login** (coluna “Login atendente”) com fallback por nome.
 - Ação de **Reatribuição em massa** (Admin) no Módulo 2.
@@ -29,7 +29,7 @@ Todas as mudanças relevantes deste projeto.
 
 ---
 
-## [1.2.0] - 2025-09-08
+## [1.1.0] - 2025-09-08
 ### Adicionado
 - Versão base com Módulo 1 (pré-análise) e Módulo 2 (conferência).
 - Leitura `.xlsx`/`.csv`, regras embutidas e validação de máscara.
