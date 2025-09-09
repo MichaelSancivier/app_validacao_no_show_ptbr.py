@@ -22,37 +22,6 @@ from backend.repo_users import list_users, create_user, set_password, set_active
 # Boot: banco + SID + login
 # ------------------------------------------------------------
 init_db()                 # cria tabelas se não existirem
-# ——————————————————————————————————————————
-# HOTFIX: garantir admin no banco em uso
-# Cole depois de init_db() e antes de chamar login()
-from backend.db import DB_URL
-from backend.repo_users import (
-    list_users, ensure_bootstrap_admin,
-    create_user, set_password, set_active,
-)
-
-st.caption(f"DB em uso: {DB_URL}")
-
-users_now = list_users(include_inactive=True)
-if not users_now:
-    # 1) tenta bootstrap padrão (retorna a senha se criou agora)
-    first_pwd = ensure_bootstrap_admin()
-    if first_pwd:
-        st.warning("Admin criado via bootstrap.")
-        st.code(f"login: admin\nsenha: {first_pwd}", language="bash")
-    else:
-        # 2) fallback explícito: cria/ajusta admin com senha conhecida
-        pwd = "SenhaNova123!"
-        try:
-            create_user("admin", "Admin", pwd, role="admin", active=1)
-            st.warning("Admin criado via fallback explícito.")
-        except Exception:
-            # se já existia, só garante senha e ativo
-            set_password("admin", pwd)
-            set_active("admin", 1)
-            st.warning("Admin ajustado (senha/ativo) via fallback.")
-        st.code(f"login: admin\nsenha: {pwd}", language="bash")
-# ——————————————————————————————————————————
 sticky_sid_bootstrap()    # fixa/restaura ?sid= e estabiliza a sessão
 authenticator, ok, username, name, role = login()
 if not ok:
