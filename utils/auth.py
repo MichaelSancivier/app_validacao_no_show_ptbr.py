@@ -3,13 +3,22 @@ from __future__ import annotations
 import os
 import streamlit as st
 import streamlit_authenticator as stauth
+from collections.abc import Mapping, Sequence
+
+def _deep_to_dict(obj):
+    """Converte Secrets (e aninhados) em dict/list normais."""
+    if isinstance(obj, Mapping):
+        return {k: _deep_to_dict(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_deep_to_dict(v) for v in obj]
+    return obj
 
 def _load_auth_config():
-    # PRODUÇÃO: usa st.secrets (Streamlit Cloud)
+    # 1) PRODUÇÃO: Secrets do Streamlit Cloud
     if "auth" in st.secrets:
-        return st.secrets["auth"]
+        return _deep_to_dict(st.secrets["auth"])  # <<< transforma em dict mutável
 
-    # DEV (opcional): só tenta auth.yaml se existir localmente
+    # 2) DEV opcional: auth.yaml local (NÃO subir no GitHub)
     if os.path.exists("auth.yaml"):
         try:
             import yaml
@@ -21,13 +30,13 @@ def _load_auth_config():
 
     raise RuntimeError(
         "Config de autenticação não encontrada. "
-        "Defina st.secrets['auth'] no Streamlit Cloud (Settings → Secrets)."
+        "Preencha st.secrets['auth'] no Streamlit Cloud (Settings → Secrets)."
     )
 
 def login():
     cfg = _load_auth_config()
 
-    # 👇 NOVO: sem 'preauthorized'
+    # Versões novas do streamlit-authenticator (sem 'preauthorized')
     authenticator = stauth.Authenticate(
         cfg["credentials"],
         cfg["cookie"]["name"],
