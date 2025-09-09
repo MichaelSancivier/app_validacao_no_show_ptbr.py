@@ -22,13 +22,29 @@ from backend.repo_users import list_users, create_user, set_password, set_active
 # Boot: banco + SID + login
 # ------------------------------------------------------------
 init_db()                 # cria tabelas se não existirem
-# --- RESET TEMPORÁRIO DE SENHA (remova depois de rodar uma vez) ---
-from backend.repo_users import set_password  # se já não estiver importado no topo
+# ====================== RESET VISÍVEL DE ADMIN (remova depois) ======================
+# Cole logo após: init_db()
+from backend.repo_users import set_password, create_user
+
+NOVA_SENHA = "SenhaNova123!"  # <-- defina aqui a senha temporária
+
+msg = ""
 try:
-    set_password("admin", "SenhaNova123!")  # defina a nova senha aqui
-except Exception:
-    pass
-# --- FIM DO RESET TEMPORÁRIO ---
+    set_password("admin", NOVA_SENHA)     # redefine a senha do admin existente
+    msg = "Senha do admin redefinida."
+except Exception as e:
+    # se não existir admin ainda, tenta criar
+    try:
+        create_user("admin", "Admin", NOVA_SENHA, role="admin", active=1)
+        msg = "Admin criado do zero com a nova senha."
+    except Exception as e2:
+        msg = f"Falhou ao redefinir/criar: {e}\n{e2}"
+
+st.warning("⚠️ Bloco de **reset de senha** está ativo. REMOVA após usar.")
+st.code(f"login: admin\nsenha: {NOVA_SENHA}", language="bash")
+st.caption(msg)
+# ================================================================================
+
 sticky_sid_bootstrap()    # fixa/restaura ?sid= e estabiliza a sessão
 authenticator, ok, username, name, role = login()
 if not ok:
