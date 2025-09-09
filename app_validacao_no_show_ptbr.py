@@ -756,41 +756,32 @@ else:
 # MÓDULO 2 — CONFERÊNCIA INDIVIDUAL POR ATENDENTE
 # ------------------------------------------------------------
 st.markdown("---")
-st.header("Módulo 2 — Conferência dos atendentes")
+
+st.markdown("### Validação automática das máscaras preenchidas")
 
 if 'out' in locals():
-    st.markdown("### Conferência por atendente")
-    nome_atendente = st.selectbox("Selecione seu nome", options=sorted(out["Atendente designado"].unique()))
-    df_atendente = out[out["Atendente designado"] == nome_atendente].copy()
+    df_validado = out.copy()
+    validacoes = []
+    for i, row in df_validado.iterrows():
+        causa = canon(row.get("Causa detectada", ""))
+        motivo = canon(row.get("Motivo detectado", ""))
+        mascara = str(row.get("Máscara prestador (preenchida)", "")).strip()
+        key = (causa, motivo)
+        found = RULES_MAP.get(key)
+        if found:
+            _, regex, _ = found
+            if regex.fullmatch(mascara):
+                validacoes.append("✅ Máscara correta")
+            else:
+                validacoes.append("❌ Máscara incorreta")
+        else:
+            validacoes.append("⚠️ Motivo não reconhecido")
+    df_validado["Validação automática"] = validacoes
+    st.dataframe(df_validado, use_container_width=True)
+else:
+    st.info("Realize a pré-análise no Módulo 1 para habilitar a validação automática.")
 
-    st.markdown(f"**Total de registros para {nome_atendente}:** {len(df_atendente)}")
-
-    # Campos de conferência
-    df_atendente["Máscara conferida"] = ""
-    df_atendente["Classificação ajustada"] = ""
-    df_atendente["Status da conferência"] = ""
-    df_atendente["Observações"] = ""
-
-    classificacoes = ["No-show Cliente", "No-show Técnico", "Erro Agendamento", "Falta de equipamentos", "Correta"]
-    status_opcoes = ["✅ App acertou", "❌ App errou, atendente corrigiu", "⚠️ Atendente errou", "⏳ Pendente"]
-
-    for i, row in df_atendente.iterrows():
-        st.markdown("---")
-        st.markdown(f"**O.S.:** {row.get('O.S.', '')}")
-        st.markdown(f"**Texto original:** {row.get('Causa. Motivo. Máscara (extra)', '')}")
-        st.markdown(f"**Classificação pré-análise:** {row.get('Classificação No-show', '')}")
-        st.markdown(f"**Resultado No Show:** {row.get('Resultado No Show', '')}")
-        st.markdown(f"**Máscara modelo:** {row.get('Máscara prestador', '')}")
-
-        df_atendente.at[i, "Máscara conferida"] = st.text_input(f"Máscara conferida (linha {i})", value="", key=f"mask_{i}")
-        df_atendente.at[i, "Classificação ajustada"] = st.selectbox(f"Classificação ajustada (linha {i})", options=classificacoes, key=f"class_{i}")
-        df_atendente.at[i, "Status da conferência"] = st.selectbox(f"Status da conferência (linha {i})", options=status_opcoes, key=f"status_{i}")
-        df_atendente.at[i, "Observações"] = st.text_area(f"Observações (linha {i})", value="", key=f"obs_{i}")
-
-    st.markdown("### Tabela final da conferência")
-    st.dataframe(df_atendente, use_container_width=True)
-
-    # Exportação
+# Exportação
     buf_conf = io.BytesIO()
     with pd.ExcelWriter(buf_conf, engine="openpyxl") as w:
         df_atendente.to_excel(w, index=False, sheet_name="Conferencia")
@@ -803,3 +794,4 @@ if 'out' in locals():
     )
 else:
     st.info("Realize a pré-análise no Módulo 1 para habilitar a conferência.")
+
