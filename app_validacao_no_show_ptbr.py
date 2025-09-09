@@ -387,7 +387,7 @@ with st.expander("Módulo 1 — Validador (Pré-análise)", expanded=(role == "a
 # ============================================================
 # MÓDULO 2 — Conferência (Análise) — com expander e botão de limpar
 # ============================================================
-with st.expander("Módulo 2 — Conferência (Análise)", expanded=True):
+with st.expander("Módulo 2 — Conferência (Análise)", expanded=False):
 
     # 1) reaproveita DF desta sessão; 2) fallback: parquet publicado pelo Admin
     out = st.session_state.get("out_df")
