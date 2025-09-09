@@ -568,3 +568,86 @@ if "out" in locals() and out is not None:
     )
 else:
     st.info("Realize a **Pré-análise** no Módulo 1 para habilitar a Conferência.")
+
+# =========================
+# Admin — Usuários
+# =========================
+from backend.repo_users import (
+    list_users, create_user, set_password, set_active,
+)
+
+st.markdown("---")
+st.header("Admin — Usuários")
+
+if role != "admin":
+    st.info("Área restrita ao administrador.")
+else:
+    tabs = st.tabs(["👥 Listar", "➕ Criar", "🔑 Trocar senha", "🚦 Ativar/Desativar"])
+
+    # Listagem
+    with tabs[0]:
+        include_inactive = st.checkbox("Mostrar inativos", value=True)
+        users_df = pd.DataFrame(list_users(include_inactive=include_inactive))
+        if not users_df.empty:
+            users_df = users_df.sort_values(["active", "username"], ascending=[False, True])
+        st.dataframe(users_df, use_container_width=True)
+
+    # Criar usuário
+    with tabs[1]:
+        st.caption("Crie logins de atendentes (ou outro admin). A senha será mostrada uma única vez.")
+        c1, c2 = st.columns(2)
+        username_new = c1.text_input("Login (sem espaços)")
+        name_new = c2.text_input("Nome")
+        role_new = st.selectbox("Papel", ["atendente", "admin"], index=0)
+
+        if st.button("Criar usuário"):
+            import secrets
+            pwd = secrets.token_urlsafe(8)
+            try:
+                create_user(username_new.strip(), name_new.strip(), pwd, role=role_new, active=1)
+            except Exception as e:
+                st.error(f"Não foi possível criar: {e}")
+            else:
+                st.success(f"Usuário criado: **{username_new}**")
+                cred = f"login: {username_new}\nsenha: {pwd}\n"
+                st.code(cred, language="bash")
+                st.download_button(
+                    "Baixar credenciais",
+                    data=cred,
+                    file_name=f"credenciais_{username_new}.txt",
+                    mime="text/plain",
+                )
+
+    # Trocar senha
+    with tabs[2]:
+        ulist = [u["username"] for u in list_users()]
+        if not ulist:
+            st.info("Sem usuários.")
+        else:
+            u_sel = st.selectbox("Usuário", ulist)
+            new_pwd = st.text_input("Nova senha", type="password")
+            if st.button("Alterar senha"):
+                try:
+                    set_password(u_sel, new_pwd)
+                except Exception as e:
+                    st.error(f"Erro: {e}")
+                else:
+                    st.success("Senha atualizada.")
+
+    # Ativar / Desativar
+    with tabs[3]:
+        users_all = list_users(include_inactive=True)
+        if not users_all:
+            st.info("Sem usuários.")
+        else:
+            u_sel = st.selectbox("Usuário", [u["username"] for u in users_all])
+            ativo_atual = next((int(u["active"]) for u in users_all if u["username"] == u_sel), 1)
+            novo_status = st.selectbox("Status", ["Ativo", "Inativo"], index=0 if ativo_atual else 1)
+            if st.button("Aplicar status"):
+                try:
+                    set_active(u_sel, 1 if novo_status == "Ativo" else 0)
+                except Exception as e:
+                    st.error(f"Erro: {e}")
+                else:
+                    st.success("Status atualizado.")
+
