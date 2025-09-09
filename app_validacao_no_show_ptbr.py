@@ -156,6 +156,11 @@ st.title("Validador de No-show — um app só")
 
 # Inicializa o banco (cria tabelas)
 init_db()
+from backend.repo_users import ensure_bootstrap_admin
+_boot = ensure_bootstrap_admin()
+if _boot:
+    st.warning(f"👑 Admin inicial criado: usuário 'admin' / senha '{_boot}'. "
+               "Entre e troque em Admin → Usuários.")
 
 # ---- Login (SQLite via utils/auth.py) ----
 authenticator, ok, username, name, role = login()
