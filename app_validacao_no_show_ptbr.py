@@ -794,4 +794,3 @@ else:
     )
 else:
     st.info("Realize a pré-análise no Módulo 1 para habilitar a conferência.")
-
