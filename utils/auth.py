@@ -1,6 +1,7 @@
 # utils/auth.py
 from __future__ import annotations
 
+import os
 import inspect
 from collections.abc import Mapping
 from typing import Tuple
@@ -48,12 +49,60 @@ def _cookie_cfg() -> Tuple[str, str, int]:
     return "vns_auth", "mude_esta_chave_em_prod", 14
 
 
+def _show_bootstrap_banner(password: str):
+    """
+    Mostra um aviso persistente com a senha do admin.
+    - Repete em cada rerun até o usuário marcar "Já copiei/ocultar".
+    - Oferece download das credenciais em admin.txt.
+    """
+    if st.session_state.get("_hide_bootstrap_banner"):
+        return
+
+    st.warning(
+        "👑 **Admin inicial criado**. Use as credenciais abaixo e depois troque a senha em "
+        "*Admin → Usuários*."
+    )
+
+    txt = f"usuario: admin\nsenha: {password}\n"
+    st.code(txt, language="bash")
+
+    st.download_button(
+        "Baixar credenciais (admin.txt)",
+        data=txt,
+        file_name="admin.txt",
+        mime="text/plain",
+        use_container_width=True,
+    )
+
+    st.checkbox("Já copiei / ocultar este aviso", key="_hide_bootstrap_banner")
+
+
+def _persist_bootstrap_password(pwd: str):
+    """
+    Persiste a senha:
+    - na sessão (para manter o banner visível entre reruns)
+    - opcionalmente em arquivo local (se o sistema permitir)
+    """
+    st.session_state["_bootstrap_admin_pwd"] = pwd
+    try:
+        os.makedirs("data", exist_ok=True)
+        with open(os.path.join("data", "ADMIN_BOOTSTRAP.txt"), "w", encoding="utf-8") as f:
+            f.write(f"usuario: admin\nsenha: {pwd}\n")
+    except Exception:
+        # Ambiente pode ser read-only no momento do bootstrap; ignoramos.
+        pass
+
+
 def _load_auth_config() -> dict:
     """
     Carrega credenciais (prioriza SQLite).
-    Se não houver usuários, cria o admin inicial (bootstrap) e avisa na tela.
+    Se não houver usuários, cria o admin inicial (bootstrap) e **mostra aviso persistente**.
     Como fallback opcional, aceita Secrets['auth'].
     """
+    # Se já temos uma senha de bootstrap na sessão, reexibimos o banner
+    if "_bootstrap_admin_pwd" in st.session_state:
+        _show_bootstrap_banner(st.session_state["_bootstrap_admin_pwd"])
+
     # 1) Banco (preferido)
     from_db = credentials_from_db()
     if from_db:
@@ -63,10 +112,8 @@ def _load_auth_config() -> dict:
     # 2) Bootstrap do admin se banco está vazio
     first_pwd = ensure_bootstrap_admin()
     if first_pwd:
-        st.warning(
-            f"👑 Admin inicial criado: **usuário `admin`** / **senha `{first_pwd}`**. "
-            "Faça login e troque a senha em *Admin → Usuários*."
-        )
+        _persist_bootstrap_password(first_pwd)
+        _show_bootstrap_banner(first_pwd)
         from_db = credentials_from_db()
         if from_db:
             name, key, days = _cookie_cfg()
@@ -95,7 +142,6 @@ def _call_login_compat(authenticator: stauth.Authenticate):
     if "location" in params and "form_name" not in params:
         try:
             from streamlit_authenticator.utilities.constants import Location
-
             res = authenticator.login(location=Location.MAIN)
         except Exception:
             res = authenticator.login(location="main")
