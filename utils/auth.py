@@ -31,23 +31,37 @@ def _load_auth_config():
         "Defina st.secrets['auth'] em Settings → Secrets do Streamlit Cloud."
     )
 
-def _call_login(authenticator: stauth.Authenticate):
-    """Chama .login() de forma compatível com versões novas/antigas."""
+def _call_login_compat(authenticator: stauth.Authenticate):
+    """
+    Chama authenticator.login() compatível com versões novas/antigas
+    e NORMALIZA o retorno para (name, auth_status, username).
+    """
+    # 1) Tenta assinatura nova (keyword 'location'), com enum se existir
     try:
-        params = inspect.signature(authenticator.login).parameters
-    except Exception:
-        params = {}
-
-    if "location" in params and "form_name" not in params:
-        # Versões novas: só 'location'
         try:
             from streamlit_authenticator.utilities.constants import Location
-            return authenticator.login(location=Location.MAIN)
+            res = authenticator.login(location=Location.MAIN)
         except Exception:
-            return authenticator.login(location="main")
-    else:
-        # Versões antigas: (form_name, location)
-        return authenticator.login("Login", "main")
+            res = authenticator.login(location="main")
+    except TypeError:
+        # 2) Assinatura antiga: (form_name, location)
+        res = authenticator.login("Login", "main")
+    except ValueError:
+        # 3) Algumas builds exigem string em vez do enum (ou vice-versa)
+        try:
+            res = authenticator.login(location="main")
+        except Exception:
+            res = authenticator.login("Login", "main")
+
+    # 4) Normaliza retorno
+    if isinstance(res, tuple) and len(res) == 3:
+        return res  # (name, auth_status, username)
+
+    # Algumas versões retornam um objeto com atributos
+    name = getattr(res, "name", None)
+    auth_status = getattr(res, "authentication_status", getattr(res, "auth_status", None))
+    username = getattr(res, "username", None)
+    return name, auth_status, username
 
 def login():
     cfg = _load_auth_config()
@@ -59,7 +73,7 @@ def login():
         cfg["cookie"]["expiry_days"],
     )
 
-    name, auth_status, username = _call_login(authenticator)
+    name, auth_status, username = _call_login_compat(authenticator)
 
     role = None
     if auth_status:
