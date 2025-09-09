@@ -189,7 +189,7 @@ def categoria_por_motivo(motivo: str) -> str:
         return ""
     if m.startswith("erro de agendamento") or "erro de roteirizacao do agendamento" in m:
         return "Erro Agendamento"
-    if m.startswith("falta de equipamento") or "perda/extravio" in m ou "equipamento com defeito" in m:
+    if m.startswith("falta de equipamento") or "perda/extravio" in m or "equipamento com defeito" in m:
         return "Falta de equipamentos"
     return ""
 
