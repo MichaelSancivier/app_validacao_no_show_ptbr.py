@@ -670,82 +670,82 @@ with st.expander("Módulo 2 — Conferência (Análise)", expanded=True):
 # Admin — Usuários (somente Admin)
 # =========================
 def render_admin_users():
-    st.markdown("---")
-    st.header("Admin — Usuários")
+    with st.expander("⚙️ Admin — Usuários", expanded=False):
+        st.header("Admin — Usuários")
 
-    tab_listar, tab_criar, tab_senha, tab_status = st.tabs(
-        ["👥 Listar", "➕ Criar", "🔑 Trocar senha", "🚦 Ativar/Desativar"]
-    )
+        tab_listar, tab_criar, tab_senha, tab_status = st.tabs(
+            ["👥 Listar", "➕ Criar", "🔑 Trocar senha", "🚦 Ativar/Desativar"]
+        )
 
-    # ------------ Listar ------------
-    with tab_listar:
-        include_inactive = st.checkbox("Mostrar inativos", value=True, key="adm_list_inativos")
-        users_df = pd.DataFrame(list_users(include_inactive=include_inactive))
-        if not users_df.empty:
-            users_df = users_df.sort_values(["active", "username"], ascending=[False, True])
-        st.dataframe(users_df, use_container_width=True)
+        # ------------ Listar ------------
+        with tab_listar:
+            include_inactive = st.checkbox("Mostrar inativos", value=True, key="adm_list_inativos")
+            users_df = pd.DataFrame(list_users(include_inactive=include_inactive))
+            if not users_df.empty:
+                users_df = users_df.sort_values(["active", "username"], ascending=[False, True])
+            st.dataframe(users_df, use_container_width=True)
 
-    # ------------ Criar ------------
-    with tab_criar:
-        st.caption("Crie logins de atendentes (ou outro admin). A senha será mostrada uma única vez.")
-        c1, c2 = st.columns(2)
-        username_new = c1.text_input("Login (sem espaços)", key="adm_user_new")
-        name_new = c2.text_input("Nome", key="adm_name_new")
-        role_new = st.selectbox("Papel", ["atendente", "admin"], index=0, key="adm_role_new")
+        # ------------ Criar ------------
+        with tab_criar:
+            st.caption("Crie logins de atendentes (ou outro admin). A senha será mostrada uma única vez.")
+            c1, c2 = st.columns(2)
+            username_new = c1.text_input("Login (sem espaços)", key="adm_user_new")
+            name_new = c2.text_input("Nome", key="adm_name_new")
+            role_new = st.selectbox("Papel", ["atendente", "admin"], index=0, key="adm_role_new")
 
-        if st.button("Criar usuário", key="adm_btn_criar"):
-            import secrets
-            pwd = secrets.token_urlsafe(8)
-            try:
-                create_user(username_new.strip(), name_new.strip(), pwd, role=role_new, active=1)
-            except Exception as e:
-                st.error(f"Não foi possível criar: {e}")
+            if st.button("Criar usuário", key="adm_btn_criar"):
+                import secrets
+                pwd = secrets.token_urlsafe(8)
+                try:
+                    create_user(username_new.strip(), name_new.strip(), pwd, role=role_new, active=1)
+                except Exception as e:
+                    st.error(f"Não foi possível criar: {e}")
+                else:
+                    st.success(f"Usuário criado: **{username_new}**")
+                    cred = f"login: {username_new}\nsenha: {pwd}\n"
+                    st.code(cred, language="bash")
+                    st.download_button(
+                        "Baixar credenciais",
+                        data=cred,
+                        file_name=f"credenciais_{username_new}.txt",
+                        mime="text/plain",
+                        key="adm_dl_creds",
+                    )
+
+        # ------------ Trocar senha ------------
+        with tab_senha:
+            ulist = [u["username"] for u in list_users()]
+            if not ulist:
+                st.info("Sem usuários.")
             else:
-                st.success(f"Usuário criado: **{username_new}**")
-                cred = f"login: {username_new}\nsenha: {pwd}\n"
-                st.code(cred, language="bash")
-                st.download_button(
-                    "Baixar credenciais",
-                    data=cred,
-                    file_name=f"credenciais_{username_new}.txt",
-                    mime="text/plain",
-                    key="adm_dl_creds",
+                u_sel = st.selectbox("Usuário", ulist, key="adm_sel_user_pwd")
+                new_pwd = st.text_input("Nova senha", type="password", key="adm_new_pwd")
+                if st.button("Alterar senha", key="adm_btn_pwd"):
+                    try:
+                        set_password(u_sel, new_pwd)
+                    except Exception as e:
+                        st.error(f"Erro: {e}")
+                    else:
+                        st.success("Senha atualizada.")
+
+        # ------------ Ativar / Desativar ------------
+        with tab_status:
+            users_all = list_users(include_inactive=True)
+            if not users_all:
+                st.info("Sem usuários.")
+            else:
+                u_sel = st.selectbox("Usuário", [u["username"] for u in users_all], key="adm_sel_user_status")
+                ativo_atual = next((int(u["active"]) for u in users_all if u["username"] == u_sel), 1)
+                novo_status = st.selectbox(
+                    "Status", ["Ativo", "Inativo"], index=0 if ativo_atual else 1, key="adm_sel_status"
                 )
-
-    # ------------ Trocar senha ------------
-    with tab_senha:
-        ulist = [u["username"] for u in list_users()]
-        if not ulist:
-            st.info("Sem usuários.")
-        else:
-            u_sel = st.selectbox("Usuário", ulist, key="adm_sel_user_pwd")
-            new_pwd = st.text_input("Nova senha", type="password", key="adm_new_pwd")
-            if st.button("Alterar senha", key="adm_btn_pwd"):
-                try:
-                    set_password(u_sel, new_pwd)
-                except Exception as e:
-                    st.error(f"Erro: {e}")
-                else:
-                    st.success("Senha atualizada.")
-
-    # ------------ Ativar / Desativar ------------
-    with tab_status:
-        users_all = list_users(include_inactive=True)
-        if not users_all:
-            st.info("Sem usuários.")
-        else:
-            u_sel = st.selectbox("Usuário", [u["username"] for u in users_all], key="adm_sel_user_status")
-            ativo_atual = next((int(u["active"]) for u in users_all if u["username"] == u_sel), 1)
-            novo_status = st.selectbox(
-                "Status", ["Ativo", "Inativo"], index=0 if ativo_atual else 1, key="adm_sel_status"
-            )
-            if st.button("Aplicar status", key="adm_btn_status"):
-                try:
-                    set_active(u_sel, 1 if novo_status == "Ativo" else 0)
-                except Exception as e:
-                    st.error(f"Erro: {e}")
-                else:
-                    st.success("Status atualizado.")
+                if st.button("Aplicar status", key="adm_btn_status"):
+                    try:
+                        set_active(u_sel, 1 if novo_status == "Ativo" else 0)
+                    except Exception as e:
+                        st.error(f"Erro: {e}")
+                    else:
+                        st.success("Status atualizado.")
 
 # Chamada protegida
 if role == "admin":
