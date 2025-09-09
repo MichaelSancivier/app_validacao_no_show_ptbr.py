@@ -208,7 +208,7 @@ with st.expander("Adicionar regras rápidas (runtime)", expanded=False):
                 erros.append(f"Linha {ln}: use 2 ';' (causa ; motivo ; mascara_modelo)")
                 continue
             causa, motivo, mascara = parts
-            if not causa ou not motivo or not mascara:
+            if not causa or not motivo or not mascara:
                 erros.append(f"Linha {ln}: campos vazios")
                 continue
             REGRAS_EMBUTIDAS.append({"causa": causa, "motivo": motivo, "mascara_modelo": mascara})
