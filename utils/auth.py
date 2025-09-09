@@ -103,6 +103,24 @@ def _clear_sid_from_url():
         del st.query_params["sid"]  # API nova
 
 
+def _ensure_sid_sticky():
+    """
+    Se o usuário está logado em session_state e o URL perdeu o 'sid',
+    repõe o mesmo sid (recomputado) para ficar 'grudado' no URL.
+    """
+    if st.session_state.get("_auth_ok"):
+        current_sid = st.query_params.get("sid")
+        if not current_sid:
+            u = st.session_state.get("_auth_user")
+            n = st.session_state.get("_auth_name", u)
+            r = st.session_state.get("_auth_role", "atendente")
+            if u:
+                sid = _make_sid(u, r, n)
+                _set_sid_in_url(sid)
+                if DEBUG_AUTH:
+                    st.sidebar.warning("[DEBUG] sid ausente → regravado no URL (sticky)")
+
+
 # -----------------------------
 # Banner de bootstrap
 # -----------------------------
@@ -256,21 +274,25 @@ def login():
 
     Fluxo:
     1) Restaura de ?sid= se existir/for válido.
-    2) Se ainda não logado, mostra login compatibilidade.
+    2) Garante que o sid fique 'grudado' no URL enquanto logado.
+    3) Se ainda não logado, mostra login compatibilidade.
     """
     # 1) tenta restaurar sessão do URL
     _restore_from_sid_if_needed()
 
-    # 2) carrega credenciais
+    # 2) garante que, se logado, o sid permaneça no URL (sticky)
+    _ensure_sid_sticky()
+
+    # 3) carrega credenciais
     cfg = _load_auth_config()
 
-    # 3) se já está ok por conta do sid
+    # 4) se já está ok por conta do sid/session_state
     if st.session_state.get("_auth_ok"):
         if DEBUG_AUTH:
             st.sidebar.caption("[DEBUG] sessão já ativa via sid/url")
         return _DummyAuth(), True, st.session_state["_auth_user"], st.session_state["_auth_name"], st.session_state["_auth_role"]
 
-    # 4) exibe formulário
+    # 5) exibe formulário
     ok, u, n, r = _fallback_manual_login(cfg)
     if ok:
         return _DummyAuth(), True, u, n, r
