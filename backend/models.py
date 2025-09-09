@@ -1,3 +1,4 @@
+# backend/models.py
 from __future__ import annotations
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, func
 from sqlalchemy.orm import relationship
@@ -18,7 +19,6 @@ class PreRow(Base):
     dataset_id = Column(Integer, ForeignKey("datasets.id"), index=True, nullable=False)
     dataset = relationship("Dataset", back_populates="rows")
 
-    # Pré-análise
     os = Column(String)
     causa_detectada = Column(String)
     motivo_detectado = Column(String)
@@ -30,10 +30,21 @@ class PreRow(Base):
     resultado_no_show = Column(String)
     atendente_designado = Column(String, index=True)
 
-    # Conferência (edição no Módulo 2)
+    # Conferência
     mascara_conferida = Column(String)
     validacao_conferida = Column(String)
     classificacao_ajustada = Column(String)
     status_conferencia = Column(String)
     observacoes = Column(String)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+# -------- NOVO: usuários --------
+class User(Base):
+    __tablename__ = "users"
+    id = Column(Integer, primary_key=True)
+    username = Column(String, unique=True, nullable=False, index=True)
+    name = Column(String, nullable=False)
+    password_hash = Column(String, nullable=False)  # bcrypt ($2b$...)
+    role = Column(String, default="atendente")      # 'admin' | 'atendente'
+    active = Column(Integer, default=1)             # 1 = ativo, 0 = inativo
+    created_at = Column(DateTime, server_default=func.now())
