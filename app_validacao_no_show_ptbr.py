@@ -22,28 +22,37 @@ from backend.repo_users import list_users, create_user, set_password, set_active
 # Boot: banco + SID + login
 # ------------------------------------------------------------
 init_db()                 # cria tabelas se não existirem
-# ====================== RESET VISÍVEL DE ADMIN (remova depois) ======================
+# ====================== RESET/RECUPERAÇÃO DO ADMIN (remova depois) ======================
 # Cole logo após: init_db()
-from backend.repo_users import set_password, create_user
+from backend.repo_users import create_user, set_password, set_active
 
-NOVA_SENHA = "SenhaNova123!"  # <-- defina aqui a senha temporária
+NOVA_SENHA = "SenhaNova123!"  # defina aqui a senha temporária
 
-msg = ""
+status = []
 try:
-    set_password("admin", NOVA_SENHA)     # redefine a senha do admin existente
-    msg = "Senha do admin redefinida."
+    # tenta redefinir a senha do admin existente
+    set_password("admin", NOVA_SENHA)
+    status.append("Senha redefinida para o usuário 'admin'.")
 except Exception as e:
-    # se não existir admin ainda, tenta criar
+    # se não existir, cria o admin do zero
     try:
         create_user("admin", "Admin", NOVA_SENHA, role="admin", active=1)
-        msg = "Admin criado do zero com a nova senha."
+        status.append("Usuário 'admin' criado do zero.")
     except Exception as e2:
-        msg = f"Falhou ao redefinir/criar: {e}\n{e2}"
+        status.append(f"Falha ao criar/redefinir: {e} | {e2}")
 
-st.warning("⚠️ Bloco de **reset de senha** está ativo. REMOVA após usar.")
-st.code(f"login: admin\nsenha: {NOVA_SENHA}", language="bash")
-st.caption(msg)
+# garante que o admin esteja ATIVO (o login só carrega usuários active=1)
+try:
+    set_active("admin", 1)
+    status.append("Usuário 'admin' ativado (active=1).")
+except Exception:
+    pass
+
+st.warning("⚠️ Bloco de **reset/recuperação do admin** está ativo. **REMOVA após usar.**")
+st.code("login: admin\nsenha: " + NOVA_SENHA, language="bash")
+st.caption(" • ".join(status))
 # ================================================================================
+
 
 sticky_sid_bootstrap()    # fixa/restaura ?sid= e estabiliza a sessão
 authenticator, ok, username, name, role = login()
