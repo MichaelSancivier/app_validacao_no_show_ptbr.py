@@ -670,12 +670,7 @@ with st.expander("Módulo 2 — Conferência (Análise)", expanded=True):
 # Admin — Usuários (somente Admin)
 # =========================
 def render_admin_users():
-    with st.expander("⚙️ Admin — Usuários", expanded=False):
-        # (opcional) st.header("Admin — Usuários")
-        tab_listar, tab_criar, tab_senha, tab_status = st.tabs(
-            ["👥 Listar", "➕ Criar", "🔑 Trocar senha", "🚦 Ativar/Desativar"]
-        )
-    st.markdown("---")
+        st.markdown("---")
     st.header("Admin — Usuários")
 
     tab_listar, tab_criar, tab_senha, tab_status = st.tabs(
