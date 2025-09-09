@@ -1,95 +1,81 @@
 # backend/repo_reviews.py
 from __future__ import annotations
-from typing import Optional
+
+from typing import List, Dict, Any
 import pandas as pd
-from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import delete, select
 
 from .db import get_session
 from .models import Review
 
 
-def upsert_reviews_from_df(
-    df: pd.DataFrame,
-    username: str,
-    batch_id: Optional[str] = None,
-) -> int:
+def _norm(x) -> str:
+    return (str(x) if x is not None else "").strip()
+
+
+def upsert_reviews_from_df(df: pd.DataFrame, *, username: str, batch_id: str) -> int:
     """
-    Grava/atualiza no banco as linhas conferidas pelo atendente.
-    Retorna a quantidade de registros persistidos.
+    Grava a conferência de um atendente.
+    Estratégia: apaga o batch_id informado (idempotente) e insere novamente.
+    Retorna a quantidade de linhas gravadas.
     """
     if df is None or df.empty:
         return 0
 
-    # Garante colunas esperadas
-    wanted = [
-        "O.S.",
-        "Máscara conferida",
-        "Classificação ajustada",
-        "Status da conferência",
-        "Observações",
-        "Validação automática (conferida)",
-        "Causa detectada",
-        "Motivo detectado",
-        "Resultado No Show",
-    ]
-    for c in wanted:
-        if c not in df.columns:
-            df[c] = ""
+    registros: List[Review] = []
+    for _, row in df.iterrows():
+        registros.append(
+            Review(
+                batch_id=batch_id,
+                username=_norm(username),
 
-    n = 0
+                os_code=_norm(row.get("O.S.", "")),
+                causa_detectada=_norm(row.get("Causa detectada", "")),
+                motivo_detectado=_norm(row.get("Motivo detectado", "")),
+                mascara_conferida=_norm(row.get("Máscara conferida", "")),
+                classificacao_ajustada=_norm(row.get("Classificação ajustada", "")),
+                status_conferencia=_norm(row.get("Status da conferência", "")),
+                observacoes=_norm(row.get("Observações", "")),
+                validacao_conferida=_norm(row.get("Validação automática (conferida)", "")),
+                detalhe_app=_norm(row.get("Detalhe (app)", "")),
+            )
+        )
+
     with get_session() as s:
-        for _, row in df.iterrows():
-            os = str(row.get("O.S.", "")).strip() or None
-            if not os:
-                continue
+        # remove qualquer lote anterior com o mesmo batch_id (idempotência)
+        s.execute(delete(Review).where(Review.batch_id == batch_id))
+        if registros:
+            s.bulk_save_objects(registros)
+        s.commit()
 
-            r = s.execute(
-                select(Review).where(Review.os == os, Review.atendente == username)
-            ).scalar_one_or_none()
-
-            if r is None:
-                r = Review(os=os, atendente=username)
-                s.add(r)
-
-            r.batch_id          = batch_id or r.batch_id
-            r.mask_conferida    = str(row.get("Máscara conferida", "") or "")
-            r.class_ajustada    = str(row.get("Classificação ajustada", "") or "")
-            r.status            = str(row.get("Status da conferência", "") or "")
-            r.obs               = str(row.get("Observações", "") or "")
-            r.validacao         = str(row.get("Validação automática (conferida)", "") or "")
-            r.causa             = str(row.get("Causa detectada", "") or "")
-            r.motivo            = str(row.get("Motivo detectado", "") or "")
-            r.resultado_no_show = str(row.get("Resultado No Show", "") or "")
-
-            try:
-                s.commit()
-                n += 1
-            except IntegrityError:
-                s.rollback()
-
-    return n
+    return len(registros)
 
 
 def list_all_reviews_df() -> pd.DataFrame:
-    """Retorna a consolidação total das conferências salvas."""
+    """Retorna todas as conferências salvas em um DataFrame pronto para exportar."""
     with get_session() as s:
         rows = s.execute(select(Review)).scalars().all()
 
     if not rows:
         return pd.DataFrame()
 
-    return pd.DataFrame([{
-        "O.S.": r.os,
-        "Atendente": r.atendente,
-        "Máscara conferida": r.mask_conferida,
-        "Classificação ajustada": r.class_ajustada,
-        "Status da conferência": r.status,
-        "Observações": r.obs,
-        "Validação automática (conferida)": r.validacao,
-        "Causa detectada": r.causa,
-        "Motivo detectado": r.motivo,
-        "Resultado No Show": r.resultado_no_show,
-        "Lote": r.batch_id,
-        "Atualizado em": r.updated_at or r.created_at,
-    } for r in rows])
+    data: List[Dict[str, Any]] = []
+    for r in rows:
+        data.append(
+            {
+                "batch_id": r.batch_id,
+                "username": r.username,
+                "O.S.": r.os_code,
+                "Causa detectada": r.causa_detectada,
+                "Motivo detectado": r.motivo_detectado,
+                "Máscara conferida": r.mascara_conferida,
+                "Classificação ajustada": r.classificacao_ajustada,
+                "Status da conferência": r.status_conferencia,
+                "Observações": r.observacoes,
+                "Validação automática (conferida)": r.validacao_conferida,
+                "Detalhe (app)": r.detalhe_app,
+                "created_at": r.created_at,
+            }
+        )
+
+    return pd.DataFrame(data)
