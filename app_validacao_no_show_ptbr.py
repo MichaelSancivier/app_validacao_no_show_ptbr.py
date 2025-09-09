@@ -22,6 +22,12 @@ from backend.repo_users import list_users, create_user, set_password, set_active
 # Boot: banco + SID + login
 # ------------------------------------------------------------
 init_db()                 # cria tabelas se não existirem
+from backend.repo_users import set_password, create_user
+# Força redefinição/garantia do admin
+try:
+    set_password("admin", "SenhaNova123!")
+except Exception:
+    create_user("admin", "Administrador", "SenhaNova123!", role="admin", active=1)
 sticky_sid_bootstrap()    # fixa/restaura ?sid= e estabiliza a sessão
 authenticator, ok, username, name, role = login()
 if not ok:
