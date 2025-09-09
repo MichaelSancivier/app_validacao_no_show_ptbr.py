@@ -762,7 +762,7 @@ st.markdown("### Validação automática das máscaras preenchidas")
 if 'out' in locals():
     df_validado = out.copy()
     validacoes = []
-    for _, row in df_validado.iterrows():
+    for i, row in df_validado.iterrows():
         causa = canon(row.get("Causa detectada", ""))
         motivo = canon(row.get("Motivo detectado", ""))
         mascara = str(row.get("Máscara prestador (preenchida)", "")).strip()
@@ -770,23 +770,27 @@ if 'out' in locals():
         found = RULES_MAP.get(key)
         if found:
             _, regex, _ = found
-            validacoes.append("✅ Máscara correta" if regex.fullmatch(mascara) else "❌ Máscara incorreta")
+            if regex.fullmatch(mascara):
+                validacoes.append("✅ Máscara correta")
+            else:
+                validacoes.append("❌ Máscara incorreta")
         else:
             validacoes.append("⚠️ Motivo não reconhecido")
-
     df_validado["Validação automática"] = validacoes
     st.dataframe(df_validado, use_container_width=True)
+else:
+    st.info("Realize a pré-análise no Módulo 1 para habilitar a validação automática.")
 
-    # Exportação dessa visão
+# Exportação
     buf_conf = io.BytesIO()
     with pd.ExcelWriter(buf_conf, engine="openpyxl") as w:
-        df_validado.to_excel(w, index=False, sheet_name="Conferencia")
+        df_atendente.to_excel(w, index=False, sheet_name="Conferencia")
 
     st.download_button(
-        "Baixar Excel — Validação automática",
+        "Baixar Excel — Conferência do atendente",
         data=buf_conf.getvalue(),
-        file_name="conferencia_validacao_automatica.xlsx",
+        file_name=f"conferencia_{nome_atendente}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 else:
-    st.info("Realize a pré-análise no Módulo 1 para habilitar a validação automática.")
+    st.info("Realize a pré-análise no Módulo 1 para habilitar a conferência.")
