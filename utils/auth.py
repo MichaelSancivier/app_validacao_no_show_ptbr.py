@@ -81,8 +81,7 @@ def _restore_from_sid_if_needed():
     """Se houver ?sid= válido e ainda não logado, restaura a sessão."""
     if st.session_state.get("_auth_ok"):
         return
-    params = st.experimental_get_query_params()
-    sid = (params.get("sid") or [None])[0]
+    sid = st.query_params.get("sid")  # API nova
     if not sid:
         return
     payload = _parse_sid(sid)
@@ -95,9 +94,13 @@ def _restore_from_sid_if_needed():
             st.sidebar.success(f"[DEBUG] sessão restaurada do URL: {payload}")
 
 
+def _set_sid_in_url(sid: str):
+    st.query_params["sid"] = sid  # API nova
+
+
 def _clear_sid_from_url():
-    # remove query params
-    st.experimental_set_query_params()
+    if "sid" in st.query_params:
+        del st.query_params["sid"]  # API nova
 
 
 # -----------------------------
@@ -212,9 +215,9 @@ def _fallback_manual_login(cfg: dict):
                 st.session_state["_auth_user"] = u
                 st.session_state["_auth_name"] = name
                 st.session_state["_auth_role"] = role
-                # grava token no URL
+                # grava token no URL (API nova)
                 sid = _make_sid(u, role, name)
-                st.experimental_set_query_params(sid=sid)
+                _set_sid_in_url(sid)
 
                 if DEBUG_AUTH:
                     st.sidebar.success(f"[DEBUG] login OK user={u}; sid emitido.")
