@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# App Streamlit — Validador No-show (Pré-análise + Conferência sem dupla checagem)
+# App Streamlit — Validador No-show (Pré-análise + Conferência, sem dupla checagem)
 from __future__ import annotations
 
 import io
@@ -9,22 +9,18 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 import streamlit as st
-
-
-# ============================================================
-# Util: normalização e regex tolerante para máscaras
-# ============================================================
 import unicodedata
 
 
+# ============================================================
+# Utils: normalização e regex tolerante para máscaras
+# ============================================================
 def _rm_acc(s: str) -> str:
-    return "".join(
-        c for c in unicodedata.normalize("NFD", s) if unicodedata.category(c) != "Mn"
-    )
+    return "".join(c for c in unicodedata.normalize("NFD", s) if unicodedata.category(c) != "Mn")
 
 
 def canon(s: str) -> str:
-    """Normaliza string: minúsculas, sem acentos, espaços normalizados."""
+    """Normaliza: minúscula, sem acentos, espaços/pontuação tolerantes."""
     if s is None or (isinstance(s, float) and pd.isna(s)):
         return ""
     s = str(s)
@@ -36,7 +32,6 @@ def canon(s: str) -> str:
 
 
 def _flexify_fixed_literal(escaped: str) -> str:
-    """Permite variações leves em pontuação/espaços no texto comparado ao modelo."""
     escaped = escaped.replace(r"\ ", r"\s+")
     escaped = escaped.replace(r"\,", r"[\s,]*")
     escaped = escaped.replace(r"\-", r"[\-\–\—]\s*")
@@ -45,10 +40,7 @@ def _flexify_fixed_literal(escaped: str) -> str:
 
 
 def template_to_regex_flex(template: str):
-    """
-    Converte um modelo com '0' (slots) para um regex tolerante.
-    Ex.: 'Cliente 0 , contato em  - ' => aceita variações de espaços/pontuação.
-    """
+    """Converte modelo com '0' (slots) em regex tolerante."""
     if template is None:
         template = ""
     t = re.sub(r"\s+", " ", str(template)).strip()
@@ -60,129 +52,36 @@ def template_to_regex_flex(template: str):
     try:
         return re.compile(pattern, flags=re.IGNORECASE | re.DOTALL)
     except re.error:
-        # fallback se algo muito estranho vier no modelo
         return re.compile(r"^\s*" + re.escape(t) + r"\s*$", flags=re.IGNORECASE)
 
 
 # ============================================================
-# Regras embutidas (catálogo) + índice (RULES_MAP)
+# Catálogo de regras embutidas + índice RULES_MAP
 # ============================================================
 REGRAS_EMBUTIDAS = [
-    {
-        "causa": "Agendamento cancelado.",
-        "motivo": "Alteração do tipo de serviço  – De assistência para reinstalação",
-        "mascara_modelo": "Não foi possível realizar o atendimento devido 0 . Cliente  foi informado sobre a necessidade de reagendamento.",
-    },
-    {
-        "causa": "Agendamento cancelado.",
-        "motivo": "Atendimento Improdutivo – Ponto Fixo/Móvel",
-        "mascara_modelo": "Veículo compareceu para atendimento, porém por 0, não foi possível realizar o serviço.",
-    },
-    {
-        "causa": "Agendamento cancelado.",
-        "motivo": "Cancelada a Pedido do Cliente",
-        "mascara_modelo": "Cliente 0 , contato via  em  - , informou indisponibilidade para o atendimento.",
-    },
-    {
-        "causa": "Agendamento cancelado.",
-        "motivo": "Cancelamento a pedido da RT",
-        "mascara_modelo": "Não foi possível realizar o atendimento devido 0 . Cliente  o  -  foi informado sobre a necessidade de reagendamento.",
-    },
-    {
-        "causa": "Agendamento cancelado.",
-        "motivo": "Cronograma de Instalação/Substituição de Placa",
-        "mascara_modelo": "Realizado atendimento com substituição de placa. Alteração feita pela OS 0.",
-    },
-    {
-        "causa": "Agendamento cancelado.",
-        "motivo": "Erro De Agendamento - Cliente desconhecia o agendamento",
-        "mascara_modelo": "Em contato com o cliente o mesmo informou que desconhecia o agendamento. Nome cliente: 0 / Data contato:  - ",
-    },
-    {
-        "causa": "Agendamento cancelado.",
-        "motivo": "Erro de Agendamento – Endereço incorreto",
-        "mascara_modelo": "Erro identificado no agendamento: 0 . Situação:. Cliente  - informado em ",
-    },
-    {
-        "causa": "Agendamento cancelado.",
-        "motivo": "Erro de Agendamento – Falta de informações na O.S.",
-        "mascara_modelo": "OS agendada apresentou erro de 0  e foi identificado através de . Realizado o contato com o cliente  - no dia  - ",
-    },
-    {
-        "causa": "Agendamento cancelado.",
-        "motivo": "Erro de Agendamento – O.S. agendada incorretamente (tipo/motivo/produto)",
-        "mascara_modelo": "OS agendada apresentou erro de 0  e foi identificado através de . Realizado o contato com o cliente  - no dia  - ",
-    },
-    {
-        "causa": "Agendamento cancelado.",
-        "motivo": "Erro de roteirização do agendamento - Atendimento móvel",
-        "mascara_modelo": "Não foi possível concluir o atendimento devido 0 . Cliente ás  -  foi informado sobre a necessidade de reagendamento. Especialista  informado ás  - ",
-    },
-    {
-        "causa": "Agendamento cancelado.",
-        "motivo": "Falta De Equipamento - Acessórios Imobilizado",
-        "mascara_modelo": "Atendimento não realizado por falta de  0 . Cliente  Informado em  - ",
-    },
-    {
-        "causa": "Agendamento cancelado.",
-        "motivo": "Falta De Equipamento - Item Reservado Não Compatível",
-        "mascara_modelo": "Atendimento não realizado por falta de  0 . Cliente  Informado em  - ",
-    },
-    {
-        "causa": "Agendamento cancelado.",
-        "motivo": "Falta De Equipamento - Material",
-        "mascara_modelo": "Atendimento não realizado por falta de  0 . Cliente  Informado em  - ",
-    },
-    {
-        "causa": "Agendamento cancelado.",
-        "motivo": "Falta De Equipamento - Principal",
-        "mascara_modelo": "Atendimento não realizado por falta de  0 . Cliente  Informado em  - ",
-    },
-    {
-        "causa": "Agendamento cancelado.",
-        "motivo": "Instabilidade de Equipamento/Sistema",
-        "mascara_modelo": "Atendimento finalizado em 0  não concluído devido à instabilidade de . Registrado teste/reinstalação em  - . Realizado contato com a central  -  e foi gerada a ASM ",
-    },
-    {
-        "causa": "Agendamento cancelado.",
-        "motivo": "No-show Cliente – Ponto Fixo/Móvel",
-        "mascara_modelo": "Cliente não compareceu para atendimento até às 0.",
-    },
-    {
-        "causa": "Agendamento cancelado.",
-        "motivo": "No-show Técnico",
-        "mascara_modelo": "Técnico 0 , em  - , não realizou o atendimento por motivo de ",
-    },
-    {
-        "causa": "Agendamento cancelado.",
-        "motivo": "Ocorrência com Técnico – Não foi possível realizar atendimento",
-        "mascara_modelo": "Técnico 0 , em  - , não realizou o atendimento por motivo de ",
-    },
-    {
-        "causa": "Agendamento cancelado.",
-        "motivo": "Ocorrência Com Técnico - Sem Tempo Hábil Para Realizar O Serviço (Atendimento Parcial)",
-        "mascara_modelo": "Não foi possível concluir o atendimento devido 0 . Cliente  às  -  foi informado sobre a necessidade de reagendamento.",
-    },
-    {
-        "causa": "Agendamento cancelado.",
-        "motivo": "Ocorrência Com Técnico - Sem Tempo Hábil Para Realizar O Serviço (Não iniciado)",
-        "mascara_modelo": "Não foi possível realizar o atendimento devido 0 . Cliente  - informado do reagendamento.",
-    },
-    {
-        "causa": "Agendamento cancelado.",
-        "motivo": "Ocorrência Com Técnico - Técnico Sem Habilidade Para Realizar Serviço",
-        "mascara_modelo": "Não foi possível realizar o atendimento devido 0 . Cliente  foi informado sobre a necessidade de reagendamento.",
-    },
-    {
-        "causa": "Agendamento cancelado.",
-        "motivo": "Perda/Extravio/Falta Do Equipamento/Equipamento Com Defeito",
-        "mascara_modelo": "Não foi possível realizar o atendimento pois 0. Cliente recusou assinar termo.",
-    },
-    {
-        "causa": "Agendamento cancelado.",
-        "motivo": "Serviço incompatível com a OS aberta",
-        "mascara_modelo": "Não foi possível realizar o atendimento devido 0 . Cliente  às  -  foi informado sobre a necessidade de reagendamento.",
-    },
+    {"causa": "Agendamento cancelado.", "motivo": "Alteração do tipo de serviço  – De assistência para reinstalação", "mascara_modelo": "Não foi possível realizar o atendimento devido 0 . Cliente  foi informado sobre a necessidade de reagendamento."},
+    {"causa": "Agendamento cancelado.", "motivo": "Atendimento Improdutivo – Ponto Fixo/Móvel", "mascara_modelo": "Veículo compareceu para atendimento, porém por 0, não foi possível realizar o serviço."},
+    {"causa": "Agendamento cancelado.", "motivo": "Cancelada a Pedido do Cliente", "mascara_modelo": "Cliente 0 , contato via  em  - , informou indisponibilidade para o atendimento."},
+    {"causa": "Agendamento cancelado.", "motivo": "Cancelamento a pedido da RT", "mascara_modelo": "Não foi possível realizar o atendimento devido 0 . Cliente  o  -  foi informado sobre a necessidade de reagendamento."},
+    {"causa": "Agendamento cancelado.", "motivo": "Cronograma de Instalação/Substituição de Placa", "mascara_modelo": "Realizado atendimento com substituição de placa. Alteração feita pela OS 0."},
+    {"causa": "Agendamento cancelado.", "motivo": "Erro De Agendamento - Cliente desconhecia o agendamento", "mascara_modelo": "Em contato com o cliente o mesmo informou que desconhecia o agendamento. Nome cliente: 0 / Data contato:  - "},
+    {"causa": "Agendamento cancelado.", "motivo": "Erro de Agendamento – Endereço incorreto", "mascara_modelo": "Erro identificado no agendamento: 0 . Situação:. Cliente  - informado em "},
+    {"causa": "Agendamento cancelado.", "motivo": "Erro de Agendamento – Falta de informações na O.S.", "mascara_modelo": "OS agendada apresentou erro de 0  e foi identificado através de . Realizado o contato com o cliente  - no dia  - "},
+    {"causa": "Agendamento cancelado.", "motivo": "Erro de Agendamento – O.S. agendada incorretamente (tipo/motivo/produto)", "mascara_modelo": "OS agendada apresentou erro de 0  e foi identificado através de . Realizado o contato com o cliente  - no dia  - "},
+    {"causa": "Agendamento cancelado.", "motivo": "Erro de roteirização do agendamento - Atendimento móvel", "mascara_modelo": "Não foi possível concluir o atendimento devido 0 . Cliente ás  -  foi informado sobre a necessidade de reagendamento. Especialista  informado ás  - "},
+    {"causa": "Agendamento cancelado.", "motivo": "Falta De Equipamento - Acessórios Imobilizado", "mascara_modelo": "Atendimento não realizado por falta de  0 . Cliente  Informado em  - "},
+    {"causa": "Agendamento cancelado.", "motivo": "Falta De Equipamento - Item Reservado Não Compatível", "mascara_modelo": "Atendimento não realizado por falta de  0 . Cliente  Informado em  - "},
+    {"causa": "Agendamento cancelado.", "motivo": "Falta De Equipamento - Material", "mascara_modelo": "Atendimento não realizado por falta de  0 . Cliente  Informado em  - "},
+    {"causa": "Agendamento cancelado.", "motivo": "Falta De Equipamento - Principal", "mascara_modelo": "Atendimento não realizado por falta de  0 . Cliente  Informado em  - "},
+    {"causa": "Agendamento cancelado.", "motivo": "Instabilidade de Equipamento/Sistema", "mascara_modelo": "Atendimento finalizado em 0  não concluído devido à instabilidade de . Registrado teste/reinstalação em  - . Realizado contato com a central  -  e foi gerada a ASM "},
+    {"causa": "Agendamento cancelado.", "motivo": "No-show Cliente – Ponto Fixo/Móvel", "mascara_modelo": "Cliente não compareceu para atendimento até às 0."},
+    {"causa": "Agendamento cancelado.", "motivo": "No-show Técnico", "mascara_modelo": "Técnico 0 , em  - , não realizou o atendimento por motivo de "},
+    {"causa": "Agendamento cancelado.", "motivo": "Ocorrência com Técnico – Não foi possível realizar atendimento", "mascara_modelo": "Técnico 0 , em  - , não realizou o atendimento por motivo de "},
+    {"causa": "Agendamento cancelado.", "motivo": "Ocorrência Com Técnico - Sem Tempo Hábil Para Realizar O Serviço (Atendimento Parcial)", "mascara_modelo": "Não foi possível concluir o atendimento devido 0 . Cliente  às  -  foi informado sobre a necessidade de reagendamento."},
+    {"causa": "Agendamento cancelado.", "motivo": "Ocorrência Com Técnico - Sem Tempo Hábil Para Realizar O Serviço (Não iniciado)", "mascara_modelo": "Não foi possível realizar o atendimento devido 0 . Cliente  - informado do reagendamento."},
+    {"causa": "Agendamento cancelado.", "motivo": "Ocorrência Com Técnico - Técnico Sem Habilidade Para Realizar Serviço", "mascara_modelo": "Não foi possível realizar o atendimento devido 0 . Cliente  foi informado sobre a necessidade de reagendamento."},
+    {"causa": "Agendamento cancelado.", "motivo": "Perda/Extravio/Falta Do Equipamento/Equipamento Com Defeito", "mascara_modelo": "Não foi possível realizar o atendimento pois 0. Cliente recusou assinar termo."},
+    {"causa": "Agendamento cancelado.", "motivo": "Serviço incompatível com a OS aberta", "mascara_modelo": "Não foi possível realizar o atendimento devido 0 . Cliente  às  -  foi informado sobre a necessidade de reagendamento."},
 ]
 
 ESPECIAIS_NO_SHOW_CLIENTE = ["Automático - PORTAL", "Michelin", "OUTRO"]
@@ -233,12 +132,12 @@ def detect_motivo_and_mask(full_text: str):
 # ============================================================
 # Streamlit
 # ============================================================
-st.set_page_config(page_title="Validador de No-show — v1.2.0", layout="wide")
-st.title("Validador de No-show — PT-BR (v1.2.0) — Sem dupla checagem")
+st.set_page_config(page_title="Validador de No-show — v1.2.1", layout="wide")
+st.title("Validador de No-show — PT-BR (v1.2.1) — Sem dupla checagem")
 
 st.caption(
     "Módulo 1: pré-análise com regras embutidas + regra especial. "
-    "Módulo 2: conferência no próprio app (com máscara conferida e validação automática)."
+    "Módulo 2: conferência no app (máscara conferida com validação automática)."
 )
 
 
@@ -331,7 +230,7 @@ if file:
 
     # Alocação de atendentes
     st.markdown("#### Alocação de atendentes (opcional)")
-    qtd = st.number_input("Número de atendentes", 1, 200, 3, help="Usado para distribuir a fila se você não passar uma coluna com os nomes.")
+    qtd = st.number_input("Número de atendentes", 1, 200, 3, help="Usado para distribuir a fila caso o arquivo não traga os nomes.")
     nomes_raw = st.text_area(
         "Nomes (1 por linha ou separados por , ; )",
         value="",
@@ -382,7 +281,8 @@ if file:
         mascaras_modelo.append(mascara_modelo_val)
 
     out = df.copy()
-    # preserva O.S. se existir
+
+    # preserva/garante O.S.
     if "O.S." not in out.columns and "OS" in out.columns:
         out = out.rename(columns={"OS": "O.S."})
     if "O.S." not in out.columns:
@@ -408,7 +308,7 @@ if file:
             resultado_no_show.append("No-show Técnico")
     out["Resultado No Show"] = resultado_no_show
 
-    # Distribuição de atendentes (se não existir coluna pronta no arquivo)
+    # Distribuição (se não existir coluna pronta)
     if "Atendente designado" not in out.columns:
         import re as _re
 
@@ -464,6 +364,7 @@ if "out" in locals() and out is not None:
         if col not in df_atendente.columns:
             df_atendente[col] = ""
 
+    # Opções
     classificacoes = [
         "No-show Cliente",
         "No-show Técnico",
@@ -477,7 +378,7 @@ if "out" in locals() and out is not None:
         "⏳ Pendente",
     ]
 
-    # ===== edição linha a linha =====
+    # ===== Edição linha a linha =====
     for i, row in df_atendente.iterrows():
         st.markdown("---")
         st.markdown(f"**O.S.:** {row.get('O.S.', '')}")
@@ -485,23 +386,27 @@ if "out" in locals() and out is not None:
         st.markdown(f"**Classificação pré-análise:** {row.get('Classificação No-show', '')}")
         st.markdown(f"**Resultado No Show (app):** {row.get('Resultado No Show', '')}")
 
-        # --- NOVO: mostrar Detalhe quando houve regra especial
+        # --- Detalhe / regra especial
         detalhe_app = str(row.get("Detalhe", "")).strip()
-        df_atendente.at[i, "Detalhe (app)"] = detalhe_app  # exporta
+        df_atendente.at[i, "Detalhe (app)"] = detalhe_app
+        is_regra_especial = "regra especial aplicada" in detalhe_app.lower()
+
         if detalhe_app:
-            if "regra especial aplicada" in detalhe_app.lower():
-                st.warning(
-                    f"**Detalhe (regra especial):**\n\n{detalhe_app}",
-                    icon="⚠️",
-                )
+            if is_regra_especial:
+                st.warning(f"**Detalhe (regra especial):**\n\n{detalhe_app}", icon="⚠️")
             else:
                 st.info(f"**Detalhe do app:** {detalhe_app}")
 
-        # Modelo oficial (gerado no Módulo 1)
-        modelo_oficial = str(row.get("Máscara prestador", "")).strip()
+        # Modelo oficial:
+        # Se houver regra especial, a máscara esperada é "No-show Cliente"
+        if is_regra_especial:
+            modelo_oficial = "No-show Cliente"
+        else:
+            modelo_oficial = str(row.get("Máscara prestador", "")).strip()
+
         st.markdown(f"**Máscara modelo (oficial):** `{modelo_oficial}`")
 
-        # --- Máscara conferida (selectbox + opção de texto livre)
+        # Máscara conferida (select + opção texto)
         opcoes_mask = ([modelo_oficial] if modelo_oficial else []) + ["(Outro texto)"]
         escolha = st.selectbox(
             f"Máscara conferida — escolha (linha {i})",
@@ -510,10 +415,9 @@ if "out" in locals() and out is not None:
             help=(
                 "Escolha a máscara **oficial** gerada pelo app OU selecione **'(Outro texto)'** para digitar uma máscara "
                 "diferente conforme sua verificação no sistema. "
-                "Se houver **regra especial**, leia o 'Detalhe' acima para entender o motivo do No-show."
+                "Em caso de **regra especial**, a máscara esperada é **'No-show Cliente'**."
             ),
         )
-
         if escolha == "(Outro texto)":
             mask_conf = st.text_area(
                 f"Digite a máscara conferida (linha {i})",
@@ -522,19 +426,23 @@ if "out" in locals() and out is not None:
                 help="Se escolheu '(Outro texto)', digite aqui a máscara exata que será registrada na O.S.",
             )
         else:
-            mask_conf = escolha  # usa o modelo oficial
+            mask_conf = escolha
 
-        # --- Validação automática da MÁSCARA CONFERIDA
-        causa = row.get("Causa detectada", "")
-        motivo = row.get("Motivo detectado", "")
-        key = (canon(causa), canon(motivo))
-        found = RULES_MAP.get(key)
-        if found:
-            _, regex, _ = found
-            mask_norm = re.sub(r"\s+", " ", str(mask_conf)).strip()
-            validacao = "✅ Máscara correta" if regex.fullmatch(mask_norm) else "❌ Máscara incorreta"
+        # Validação automática da máscara conferida
+        if is_regra_especial:
+            # Esperado literal "No-show Cliente" (tolerante a caixa/espaços)
+            validacao = "✅ Máscara correta" if canon(mask_conf) == canon("No-show Cliente") else "❌ Máscara incorreta"
         else:
-            validacao = "⚠️ Motivo não reconhecido"
+            causa = row.get("Causa detectada", "")
+            motivo = row.get("Motivo detectado", "")
+            key_rm = (canon(causa), canon(motivo))
+            found = RULES_MAP.get(key_rm)
+            if found:
+                _, regex, _ = found
+                mask_norm = re.sub(r"\s+", " ", str(mask_conf)).strip()
+                validacao = "✅ Máscara correta" if regex.fullmatch(mask_norm) else "❌ Máscara incorreta"
+            else:
+                validacao = "⚠️ Motivo não reconhecido"
 
         st.caption(f"**Validação automática (conferida):** {validacao}")
 
@@ -542,12 +450,15 @@ if "out" in locals() and out is not None:
         df_atendente.at[i, "Máscara conferida"] = mask_conf
         df_atendente.at[i, "Validação automática (conferida)"] = validacao
 
-        # Classificação ajustada
-        idx_default = (
-            classificacoes.index(row.get("Resultado No Show", ""))
-            if row.get("Resultado No Show", "") in classificacoes
-            else 0
-        )
+        # Classificação ajustada (pré-seleciona No-show Cliente quando especial)
+        if is_regra_especial and "No-show Cliente" in classificacoes:
+            idx_default = classificacoes.index("No-show Cliente")
+        else:
+            idx_default = (
+                classificacoes.index(row.get("Resultado No Show", ""))
+                if row.get("Resultado No Show", "") in classificacoes
+                else 0
+            )
         df_atendente.at[i, "Classificação ajustada"] = st.selectbox(
             f"Classificação ajustada (linha {i})",
             options=classificacoes,
@@ -572,7 +483,7 @@ if "out" in locals() and out is not None:
             help="Use para observações complementares (evidências, contato, RT, etc.).",
         )
 
-    # ===== tabela final + export =====
+    # Tabela final + export
     st.markdown("### Tabela final da conferência")
     st.dataframe(df_atendente, use_container_width=True)
 
@@ -589,4 +500,3 @@ if "out" in locals() and out is not None:
     )
 else:
     st.info("Realize a **Pré-análise** no Módulo 1 para habilitar a Conferência.")
-
