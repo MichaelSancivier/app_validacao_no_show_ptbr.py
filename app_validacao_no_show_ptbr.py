@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import re
 from datetime import datetime
+import uuid
 
 import numpy as np
 import pandas as pd
@@ -16,6 +17,7 @@ import unicodedata
 # (requer utils/auth.py e backend/db.py do pacote que preparamos)
 from backend.db import init_db
 from utils.auth import sticky_sid_bootstrap, login
+from backend.repo_reviews import upsert_reviews_from_df, list_all_reviews_df  # <-- persistência
 
 # Inicializa SQLite e tabelas (evita "no such table: users")
 init_db()
@@ -369,13 +371,20 @@ st.header("Módulo 2 — Conferência (sem dupla checagem)")
 if "out" in locals() and out is not None:
     st.markdown("### Conferência por atendente")
 
-    nome_atendente = st.selectbox(
-        "Selecione seu nome",
-        options=sorted(out["Atendente designado"].astype(str).unique()),
-        help="Selecione o atendente para carregar apenas os registros designados.",
-    )
+    # --- visibilidade por papel (admin escolhe; atendente vê só o próprio)
+    if role == "admin":
+        nome_atendente = st.selectbox(
+            "Selecione seu nome",
+            options=sorted(out["Atendente designado"].astype(str).unique()),
+            help="Admin pode escolher qualquer atendente para conferir."
+        )
+    else:
+        # usa o username (login) como nome do atendente
+        nome_atendente = (username or st.session_state.get("_auth_user", "") or "").strip()
+        st.info(f"Você está conferindo as O.S. de **{nome_atendente or '—'}**.")
+
     df_atendente = out[out["Atendente designado"].astype(str) == str(nome_atendente)].copy()
-    st.markdown(f"**Total de registros para {nome_atendente}:** {len(df_atendente)}")
+    st.markdown(f"**Total de registros para {nome_atendente or '—'}:** {len(df_atendente)}")
 
     # Garante colunas de conferência
     for col in [
@@ -423,7 +432,6 @@ if "out" in locals() and out is not None:
                 st.info(f"**Detalhe do app:** {detalhe_app}")
 
         # Modelo oficial:
-        # Se houver regra especial, a máscara esperada é "No-show Cliente"
         if is_regra_especial:
             modelo_oficial = "No-show Cliente"
         else:
@@ -455,7 +463,6 @@ if "out" in locals() and out is not None:
 
         # Validação automática da máscara conferida
         if is_regra_especial:
-            # Esperado literal "No-show Cliente" (tolerante a caixa/espaços)
             validacao = "✅ Máscara correta" if canon(mask_conf) == canon("No-show Cliente") else "❌ Máscara incorreta"
         else:
             causa = row.get("Causa detectada", "")
@@ -492,10 +499,13 @@ if "out" in locals() and out is not None:
             help="Ajuste a classificação final conforme a conferência no sistema (cliente, técnico, erro de agendamento, etc.).",
         )
 
-        # Status da conferência
+        # Status da conferência (default Pendente; se existir valor, usa-o)
+        status_atual = str(row.get("Status da conferência", "")).strip()
+        idx_status = status_opcoes.index(status_atual) if status_atual in status_opcoes else 0
         df_atendente.at[i, "Status da conferência"] = st.selectbox(
             f"Status da conferência (linha {i})",
             options=status_opcoes,
+            index=idx_status,
             key=f"status_{i}",
             help="Registre o desfecho: se o app acertou, se você corrigiu, se houve erro do atendente ou mantenha pendente.",
         )
@@ -508,6 +518,39 @@ if "out" in locals() and out is not None:
             help="Use para observações complementares (evidências, contato, RT, etc.).",
         )
 
+    # ==== Persistência da conferência no servidor ====
+    st.markdown("#### Salvar no servidor")
+    if st.button("💾 Salvar conferência deste atendente", type="primary", key="save_att"):
+        batch_id = str(uuid.uuid4())[:8]
+        gravados = upsert_reviews_from_df(
+            df_atendente.copy(),
+            username=(username or st.session_state.get("_auth_user", "")),
+            batch_id=batch_id,
+        )
+        if gravados:
+            st.success(f"✅ {gravados} linha(s) salva(s) (lote {batch_id}).")
+        else:
+            st.info("Nada novo para salvar.")
+
+    # ==== Consolidação geral (somente Admin) ====
+    if role == "admin":
+        with st.expander("Consolidação geral (Admin)", expanded=False):
+            if st.button("📥 Exportar consolidação (XLSX)", key="export_all"):
+                df_all = list_all_reviews_df()
+                if df_all.empty:
+                    st.warning("Nenhum dado salvo ainda.")
+                else:
+                    buf = io.BytesIO()
+                    with pd.ExcelWriter(buf, engine="openpyxl") as w:
+                        df_all.to_excel(w, index=False, sheet_name="Consolidado")
+                    st.download_button(
+                        "⬇️ Baixar consolidado.xlsx",
+                        data=buf.getvalue(),
+                        file_name=f"consolidado_{datetime.now():%Y%m%d-%H%M}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key="dl_all",
+                    )
+
     # Tabela final + export
     st.markdown("### Tabela final da conferência")
     st.dataframe(df_atendente, use_container_width=True)
@@ -519,7 +562,7 @@ if "out" in locals() and out is not None:
     st.download_button(
         "⬇️ Baixar Excel — Conferência do atendente",
         data=buf_conf.getvalue(),
-        file_name=f"conferencia_{nome_atendente}.xlsx",
+        file_name=f"conferencia_{nome_atendente or 'atendente'}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         help="Exporta a conferência do atendente com a máscara conferida e a validação automática.",
     )
