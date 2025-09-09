@@ -9,21 +9,8 @@ import streamlit as st
 
 from backend.repo_users import credentials_from_db, ensure_bootstrap_admin
 
-# Ligue para ver informações de diagnóstico na lateral
-DEBUG_AUTH = False
-
-
-# -----------------------------
-# Util: rerun compatível
-# -----------------------------
-def _rerun():
-    try:
-        st.rerun()
-    except Exception:
-        try:
-            st.experimental_rerun()
-        except Exception:
-            pass
+# Ligue para ver diagnósticos na barra lateral durante o login
+DEBUG_AUTH = True
 
 
 # -----------------------------
@@ -73,7 +60,7 @@ def _persist_bootstrap_password(pwd: str):
         with open(os.path.join("data", "ADMIN_BOOTSTRAP.txt"), "w", encoding="utf-8") as f:
             f.write(f"usuario: admin\nsenha: {pwd}\n")
     except Exception:
-        # ambiente read-only? ok, seguimos
+        # ambiente pode ser read-only; segue o jogo
         pass
 
 
@@ -111,8 +98,8 @@ def _load_auth_config() -> dict:
 def _fallback_manual_login(cfg: dict):
     """
     Formulário com st.form que valida usuário/senha (bcrypt)
-    e mantém sessão em st.session_state. O st.form evita reruns
-    no meio do submit, deixando o login confiável.
+    e mantém sessão em st.session_state. Ao validar, já retorna
+    ok=True na mesma execução (sem depender de st.rerun()).
     """
     st.subheader("Login")
 
@@ -125,14 +112,19 @@ def _fallback_manual_login(cfg: dict):
         submitted = st.form_submit_button("Entrar")
 
     if DEBUG_AUTH:
-        st.sidebar.caption(f"[DEBUG] submitted={submitted} users_keys={list(users.keys())[:5]}...")
+        st.sidebar.caption(
+            f"[DEBUG] submitted={submitted} | users={len(users)} | keys_exemplo={list(users.keys())[:3]}"
+        )
 
     if submitted:
         u = (u or "").strip()
         p = (p or "").strip()
 
+        if DEBUG_AUTH:
+            st.sidebar.caption(f"[DEBUG] user_tentativa='{u}'")
+
         if u in users:
-            # pega o hash guardado (aceita vários nomes)
+            # pega o hash guardado (aceita vários nomes de campo)
             stored = (
                 users[u].get("password")
                 or users[u].get("hashed_password")
@@ -155,13 +147,17 @@ def _fallback_manual_login(cfg: dict):
                     st.sidebar.error(f"[DEBUG] bcrypt.checkpw error: {e}")
 
             if ok:
+                # marca sessão e JÁ devolve ok=True
                 st.session_state["_auth_ok"] = True
                 st.session_state["_auth_user"] = u
                 st.session_state["_auth_name"] = users[u].get("name", u)
                 st.session_state["_auth_role"] = users[u].get("role", "atendente")
+
                 if DEBUG_AUTH:
                     st.sidebar.success(f"[DEBUG] login OK user={u}")
-                _rerun()
+
+                st.success("Login realizado!")
+                return True, st.session_state["_auth_user"], st.session_state["_auth_name"], st.session_state["_auth_role"]
             else:
                 st.error("Usuário/senha inválidos.")
                 if DEBUG_AUTH:
@@ -171,6 +167,7 @@ def _fallback_manual_login(cfg: dict):
             if DEBUG_AUTH:
                 st.sidebar.error(f"[DEBUG] usuário '{u}' não encontrado")
 
+    # Caso já esteja logado de execuções anteriores
     if st.session_state.get("_auth_ok"):
         return True, st.session_state["_auth_user"], st.session_state["_auth_name"], st.session_state["_auth_role"]
     return None, None, None, None
@@ -182,7 +179,7 @@ class _DummyAuth:
     def logout(self, *args, **kwargs):
         for k in ("_auth_ok", "_auth_user", "_auth_name", "_auth_role"):
             st.session_state.pop(k, None)
-        _rerun()
+        # não precisa de rerun; o app vai renderizar o bloco de login naturalmente
 
 
 # -----------------------------
