@@ -142,7 +142,7 @@ def detect_motivo_and_mask(full_text: str):
 # Streamlit (UI)
 # ============================================================
 st.set_page_config(page_title="Validador de No-show — v1.2.1", layout="wide")
-st.title("Validador de No-show — PT-BR (v1.2.1) — Sem dupla checagem")
+st.title("Validador de No-show — PT-BR")
 st.caption(
     "Módulo 1: pré-análise com regras embutidas + regra especial. "
     "Módulo 2: conferência no app (máscara conferida com validação automática)."
