@@ -99,7 +99,7 @@ def _load_auth_config() -> dict:
             return {"credentials": from_db}
 
     # 3) Sem credenciais
-    raise RuntimeError("Sem usuários no banco. Use o bloque 'Setup rápido' para criar o admin.")
+    raise RuntimeError("Sem usuários no banco. Use o bloco 'Setup rápido' para criar o admin.")
 
 
 # -----------------------------
@@ -107,15 +107,21 @@ def _load_auth_config() -> dict:
 # -----------------------------
 def _fallback_manual_login(cfg: dict):
     """
-    Formulário simples que valida usuário/senha com bcrypt
-    e mantém sessão em st.session_state.
+    Formulário com st.form que valida usuário/senha (bcrypt)
+    e mantém sessão em st.session_state. O st.form evita reruns
+    no meio do submit, deixando o login 100% confiável.
     """
     st.subheader("Login")
+
     users = cfg["credentials"]["usernames"]
 
-    u = st.text_input("Username", key="fb_user")
-    p = st.text_input("Password", type="password", key="fb_pass")
-    if st.button("Entrar", key="fb_btn"):
+    # FORM: o rerun só acontece após o submit
+    with st.form("compat_login", clear_on_submit=False):
+        u = st.text_input("Username", key="fb_user")
+        p = st.text_input("Password", type="password", key="fb_pass")
+        submitted = st.form_submit_button("Entrar")
+
+    if submitted:
         if u in users:
             try:
                 ok = bcrypt.checkpw(p.encode("utf-8"), users[u]["password"].encode("utf-8"))
