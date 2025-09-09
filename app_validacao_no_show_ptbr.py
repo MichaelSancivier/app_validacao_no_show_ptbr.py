@@ -18,8 +18,14 @@ from backend.repo import (
     load_rows_for_user,
     save_conferencia,
 )
-from utils.auth import login
+from utils.auth import sticky_sid_bootstrap, login
 
+# --- sesión / login ---------------------------------------------------------
+sticky_sid_bootstrap()  # asegura restauración y deja el sid “pegado” en la URL
+
+authenticator, ok, username, name, role = login()
+if not ok:
+    st.stop()  # no renderiza el resto del app si no está logueado
 # =========================================
 # Utilidades de normalização/regex
 # =========================================
