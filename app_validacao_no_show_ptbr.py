@@ -397,10 +397,10 @@ if "out" in locals() and out is not None:
         "Falta de equipamentos",
     ]
     status_opcoes = [
+        "⏳ Pendente",
         "✅ App acertou",
         "❌ App errou, atendente corrigiu",
         "⚠️ Atendente errou",
-        "⏳ Pendente",
     ]
 
     # ===== Edição linha a linha =====
