@@ -208,7 +208,7 @@ with st.expander("Adicionar regras rápidas (runtime)", expanded=False):
                 erros.append(f"Linha {ln}: use 2 ';' (causa ; motivo ; mascara_modelo)")
                 continue
             causa, motivo, mascara = parts
-            if not causa or not motivo or not mascara:
+            if not causa ou not motivo or not mascara:
                 erros.append(f"Linha {ln}: campos vazios")
                 continue
             REGRAS_EMBUTIDAS.append({"causa": causa, "motivo": motivo, "mascara_modelo": mascara})
@@ -305,10 +305,9 @@ if file:
             resultado_no_show.append("No-show Técnico")
     out["Resultado No Show"] = resultado_no_show
 
-    # -------------------- Alocação de atendentes — por LOGIN (recomendado) --------------------
+    # -------------------- Alocação por LOGIN (com fallback por nome) --------------------
     st.markdown("#### Alocação de atendentes")
 
-    # Logins ativos (papel 'atendente') vindos do banco
     usuarios_ativos = [
         u for u in list_users(include_inactive=False)
         if u.get("role") == "atendente" and int(u.get("active", 0)) == 1
@@ -316,7 +315,6 @@ if file:
     logins_disponiveis = sorted({u["username"] for u in usuarios_ativos})
     nome_por_login = {u["username"]: u["name"] for u in usuarios_ativos}
 
-    # Escolha quais logins entram na distribuição
     logins_escolhidos = st.multiselect(
         "Logins que participarão da conferência",
         options=logins_disponiveis,
@@ -324,7 +322,6 @@ if file:
         help="As O.S. serão distribuídas ciclicamente entre os logins selecionados.",
     )
 
-    # Fallback por NOME (use somente se não quiser distribuir por login)
     st.caption("Fallback por **nome** (apenas se você não quiser distribuir por login).")
     qtd = st.number_input("Número de atendentes (fallback por nome)", 1, 200, 3)
     nomes_raw = st.text_area(
@@ -332,7 +329,6 @@ if file:
         value="",
     )
 
-    # 1) Distribuição priorizando LOGIN
     if "Login atendente" not in out.columns and logins_escolhidos:
         import numpy as _np
         bloco = int(_np.ceil(len(out) / max(1, len(logins_escolhidos))))
@@ -340,7 +336,6 @@ if file:
         out.insert(0, "Login atendente", logins_alocados)
         out.insert(1, "Atendente designado", [nome_por_login.get(l, l) for l in logins_alocados])
 
-    # 2) Se não foi por login e não existe 'Atendente designado', usa fallback por NOME
     if "Atendente designado" not in out.columns:
         import re as _re, numpy as _np
         nomes = [n.strip() for n in _re.split(r"[,;\n]+", nomes_raw) if n.strip()]
@@ -352,11 +347,13 @@ if file:
         bloco = int(_np.ceil(len(out) / len(nomes)))
         out.insert(0, "Atendente designado", (nomes * bloco)[: len(out)])
 
-    # 3) Se já existe 'Atendente designado' mas não 'Login atendente', tenta inferir o login pelo nome
     if "Login atendente" not in out.columns:
         rev_login_por_nome = {v: k for k, v in nome_por_login.items()}
         out.insert(0, "Login atendente", [rev_login_por_nome.get(str(n), "") for n in out["Atendente designado"]])
-    # ------------------------------------------------------------------------------------------
+    # ------------------------------------------------------------------------------------
+
+    # guarda OUT na sessão para permitir reatribuições no Módulo 2
+    st.session_state["out_df"] = out
 
     st.success("Pré-análise concluída.")
     st.dataframe(out, use_container_width=True)
@@ -378,10 +375,48 @@ if file:
 st.markdown("---")
 st.header("Módulo 2 — Conferência (sem dupla checagem)")
 
+# carrega o OUT mais recente da sessão (se houver)
+if "out_df" in st.session_state:
+    out = st.session_state["out_df"]
+
 if "out" in locals() and out is not None:
+
+    # ================== Bulk reassignment (ADMIN) ==================
+    if role == "admin" and "Login atendente" in out.columns:
+        with st.expander("🔁 Reatribuir O.S. (Admin)", expanded=False):
+            # logins atuais na planilha + logins ativos no banco
+            current_logins = sorted(out["Login atendente"].astype(str).unique())
+            ativos = [u for u in list_users(include_inactive=False) if int(u.get("active", 0)) == 1]
+            known_logins = sorted(set(current_logins) | {u["username"] for u in ativos})
+            nome_por_login_all = {u["username"]: u["name"] for u in ativos}
+
+            src = st.selectbox("Reatribuir de (login origem)", current_logins, key="re_src")
+            dst = st.selectbox("Para (login destino)", [l for l in known_logins if l != src], key="re_dst")
+            only_pend = st.checkbox("Apenas O.S. com status '⏳ Pendente'", value=True, key="re_pend")
+            qtd_max = st.number_input("Qtde a mover (0 = todas elegíveis)", min_value=0, max_value=len(out), value=0, step=1, key="re_qtd")
+
+            if st.button("🔁 Reatribuir O.S. para outro login", key="btn_reassign"):
+                mask = out["Login atendente"].astype(str) == str(src)
+                if only_pend:
+                    if "Status da conferência" in out.columns:
+                        pend_mask = out["Status da conferência"].astype(str).fillna("").str.contains("Pendente")
+                        mask = mask & pend_mask
+                    else:
+                        st.warning("Coluna 'Status da conferência' ainda não existe; reatribuindo **sem** filtrar pendentes.")
+                idx = out[mask].index.tolist()
+                if qtd_max and qtd_max > 0:
+                    idx = idx[:qtd_max]
+                if not idx:
+                    st.info("Nada para reatribuir.")
+                else:
+                    out.loc[idx, "Login atendente"] = dst
+                    out.loc[idx, "Atendente designado"] = [nome_por_login_all.get(dst, dst)] * len(idx)
+                    st.session_state["out_df"] = out
+                    st.success(f"Reatribuídas {len(idx)} O.S. de **{src}** → **{dst}**.")
+    # ===============================================================
+
     st.markdown("### Conferência por atendente")
 
-    # chave de filtro: login se existir; senão, nome
     chave = "Login atendente" if "Login atendente" in out.columns else "Atendente designado"
 
     if role == "admin":
