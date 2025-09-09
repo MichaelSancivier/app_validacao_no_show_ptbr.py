@@ -266,6 +266,18 @@ class _DummyAuth:
 
 
 # -----------------------------
+# Guard inicial (público)
+# -----------------------------
+def sticky_sid_bootstrap():
+    """
+    Chame ESTA função no topo do seu app, antes de qualquer coisa.
+    Ela restaura do ?sid= (se existir) e garante que o sid fique grudado no URL.
+    """
+    _restore_from_sid_if_needed()
+    _ensure_sid_sticky()
+
+
+# -----------------------------
 # Função pública usada no app
 # -----------------------------
 def login():
