@@ -670,13 +670,8 @@ with st.expander("Módulo 2 — Conferência (Análise)", expanded=True):
 # Admin — Usuários (somente Admin)
 # =========================
 def render_admin_users():
-        st.markdown("---")
+    st.markdown("---")
     st.header("Admin — Usuários")
-
-    tab_listar, tab_criar, tab_senha, tab_status = st.tabs(
-        ["👥 Listar", "➕ Criar", "🔑 Trocar senha", "🚦 Ativar/Desativar"]
-    )
-
     # ------------ Listar ------------
     with tab_listar:
         include_inactive = st.checkbox("Mostrar inativos", value=True, key="adm_list_inativos")
