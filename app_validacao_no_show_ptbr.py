@@ -22,6 +22,13 @@ from backend.repo_users import list_users, create_user, set_password, set_active
 # Boot: banco + SID + login
 # ------------------------------------------------------------
 init_db()                 # cria tabelas se não existirem
+# --- RESET TEMPORÁRIO DE SENHA (remova depois de rodar uma vez) ---
+from backend.repo_users import set_password  # se já não estiver importado no topo
+try:
+    set_password("admin", "SenhaNova123!")  # defina a nova senha aqui
+except Exception:
+    pass
+# --- FIM DO RESET TEMPORÁRIO ---
 sticky_sid_bootstrap()    # fixa/restaura ?sid= e estabiliza a sessão
 authenticator, ok, username, name, role = login()
 if not ok:
