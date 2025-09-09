@@ -7,8 +7,8 @@ Aplicação **Streamlit** para validar **Máscaras de No-show** em ordens de ser
 ## Funcionalidades principais
 - Lê arquivos de entrada em **Excel (.xlsx)** e **CSV (.csv)**.
 - Você escolhe **qual coluna** contém `Causa. Motivo. Máscara...` (preenchida pelo prestador).
-- Compara com as **17 regras embutidas**:
-  - 15 regras oficiais de negócio.
+- Compara com as **23 regras embutidas**:
+  - 21 regras oficiais de negócio.
   - +2 regras novas adicionadas:
     - **Alteração do tipo de serviço**
     - **Ocorrência Com Técnico - Técnico Sem Habilidade Para Realizar Serviço**
