@@ -1,8 +1,14 @@
+# backend/db.py
 from __future__ import annotations
+import os
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, declarative_base
 
-DB_URL = "sqlite:///data/no_show_v3.db"  # mude o nome
+# >>> garanta a pasta 'data/' e escolha o nome do arquivo
+DB_DIR = "data"
+DB_FILE = "no_show_v2.db"           # você pode trocar esse nome quando quiser resetar
+os.makedirs(DB_DIR, exist_ok=True)  # <- cria a pasta no Cloud
+DB_URL = f"sqlite:///{os.path.join(DB_DIR, DB_FILE)}"
 
 engine = create_engine(DB_URL, future=True)
 
