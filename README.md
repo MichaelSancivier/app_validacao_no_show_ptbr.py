@@ -1,4 +1,4 @@
-# Validador de No-show — PT-BR (v1.2.1)
+# Validador de No-show — PT-BR (v1.2.0)
 
 Aplicação **Streamlit** para validar **Máscaras de No-show** em ordens de serviço, com:
 - **Módulo 1 (Admin):** Pré-análise com regras embutidas + regra especial.
