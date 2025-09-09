@@ -388,7 +388,7 @@ else:
 # MÓDULO 2 — Conferência (sem dupla checagem)
 # ============================================================
 st.markdown("---")
-st.header("Módulo 2 — Conferência (Análise)")
+st.header("Módulo 2 — Conferência")
 
 # 1) reaproveita DF desta sessão; 2) fallback: parquet publicado pelo Admin
 out = st.session_state.get("out_df")
