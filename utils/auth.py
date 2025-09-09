@@ -1,6 +1,7 @@
 # utils/auth.py
 from __future__ import annotations
 import os
+import inspect
 import streamlit as st
 import streamlit_authenticator as stauth
 from collections.abc import Mapping
@@ -13,8 +14,11 @@ def _deep_to_dict(obj):
     return obj
 
 def _load_auth_config():
+    # 1) PRODUÇÃO: Secrets do Streamlit Cloud
     if "auth" in st.secrets:
         return _deep_to_dict(st.secrets["auth"])  # st.secrets -> dict mutável
+
+    # 2) DEV (opcional): auth.yaml local (NÃO subir no GitHub)
     if os.path.exists("auth.yaml"):
         try:
             import yaml
@@ -23,6 +27,7 @@ def _load_auth_config():
                 return yaml.load(f, Loader=SafeLoader)
         except Exception as e:
             raise RuntimeError(f"Falha ao ler auth.yaml: {e}")
+
     raise RuntimeError(
         "Config de autenticação não encontrada. "
         "Preencha st.secrets['auth'] no Streamlit Cloud (Settings → Secrets)."
@@ -31,7 +36,6 @@ def _load_auth_config():
 def login():
     cfg = _load_auth_config()
 
-    # versões novas não aceitam 'preauthorized'
     authenticator = stauth.Authenticate(
         cfg["credentials"],
         cfg["cookie"]["name"],
@@ -39,22 +43,18 @@ def login():
         cfg["cookie"]["expiry_days"],
     )
 
-    # --- Compatível com versões NOVA e ANTIGA ---
-    try:
+    # Detecta assinatura do 'login' para ser compatível com qualquer versão
+    sig = inspect.signature(authenticator.login).parameters
+    if "location" in sig and "form_name" not in sig:
         # NOVA API: só 'location'
         name, auth_status, username = authenticator.login(location="main")
-    except TypeError:
+    else:
         # ANTIGA API: (form_name, location)
         name, auth_status, username = authenticator.login("Login", "main")
 
+    # Papel do usuário (admin/atendente)
     role = None
     if auth_status:
         role = cfg["credentials"]["usernames"][username].get("role", "atendente")
-
-    # botão de logout (compatível com as duas APIs)
-    try:
-        authenticator.logout(location="sidebar")
-    except TypeError:
-        authenticator.logout("Sair", "sidebar")
 
     return authenticator, auth_status, username, name, role
