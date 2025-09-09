@@ -339,7 +339,7 @@ if file:
 # MÓDULO 2 — Conferência (sem dupla checagem)
 # ============================================================
 st.markdown("---")
-st.header("Módulo 2 — Conferência")
+st.header("Módulo 2 — Conferência (Análise)")
 
 if "out" in locals() and out is not None:
     st.markdown("### Conferência por atendente")
