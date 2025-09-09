@@ -1,18 +1,9 @@
-# -*- coding: utf-8 -*-
-from __future__ import annotations
 import io
 import re
 import math
-import json
 import unicodedata
-import datetime as dt
-from dataclasses import dataclass
-from typing import List, Dict
-
-import numpy as np
 import pandas as pd
 import streamlit as st
-from datetime import datetime
 
 # ------------------------------------------------------------
 # CONFIG
@@ -25,33 +16,138 @@ st.title("Validador de No-show — PT-BR")
 # -> Base normalizada a partir das regras enviadas
 # ============================================================
 REGRAS_EMBUTIDAS = [
-    {"causa": "Agendamento cancelado", "motivo": "Alteração do tipo de serviço  – De assistência para reinstalação", "mascara_modelo": "Não foi possível realizar o atendimento devido 0 . Cliente  foi informado sobre a necessidade de reagendamento."},
-    {"causa": "Agendamento cancelado", "motivo": "Atendimento Improdutivo – Ponto Fixo/Móvel", "mascara_modelo": "Veículo compareceu para atendimento, porém por 0, não foi possível realizar o serviço."},
-    {"causa": "Agendamento cancelado", "motivo": "Cancelada a Pedido do Cliente", "mascara_modelo": "Cliente 0 , contato via  em  - , informou indisponibilidade para o atendimento."},
-    {"causa": "Agendamento cancelado", "motivo": "Cancelada a Pedido do Cliente", "mascara_modelo": "Cliente 0 , contato via  em  - , informou indisponibilidade para o atendimento."},
-    {"causa": "Agendamento cancelado", "motivo": "Cancelamento a pedido da RT", "mascara_modelo": "Não foi possível realizar o atendimento devido 0 . Cliente  o  -  foi informado sobre a necessidade de reagendamento."},
-    {"causa": "Agendamento cancelado", "motivo": "Cronograma de Instalação/Substituição de Placa", "mascara_modelo": "Realizado atendimento com substituição de placa. Alteração feita pela OS 0."},
-    {"causa": "Agendamento cancelado", "motivo": "Erro De Agendamento - Cliente desconhecia o agendamento", "mascara_modelo": "Em contato com o cliente o mesmo informou que desconhecia o agendamento. Nome cliente: 0 / Data contato:  - "},
-    {"causa": "Agendamento cancelado", "motivo": "Erro de Agendamento – Endereço incorreto", "mascara_modelo": "Erro identificado no agendamento: 0 . Situação:. Cliente  - informado em "},
-    {"causa": "Agendamento cancelado", "motivo": "Erro de Agendamento – Falta de informações na O.S.", "mascara_modelo": "OS agendada apresentou erro de 0  e foi identificado através de . Realizado o contato com o cliente  - no dia  - "},
-    {"causa": "Agendamento cancelado", "motivo": "Erro de Agendamento – O.S. agendada incorretamente (tipo/motivo/produto)", "mascara_modelo": "OS agendada apresentou erro de 0  e foi identificado através de . Realizado o contato com o cliente  - no dia  - "},
-    {"causa": "Agendamento cancelado", "motivo": "Erro de roteirização do agendamento - Atendimento móvel", "mascara_modelo": "Não foi possível concluir o atendimento devido 0 . Cliente ás  -  foi informado sobre a necessidade de reagendamento. Especialista  informado ás  - "},
-    {"causa": "Agendamento cancelado", "motivo": "Erro de roteirização do agendamento - Atendimento móvel", "mascara_modelo": "Não foi possível concluir o atendimento devido 0 . Cliente ás  -  foi informado sobre a necessidade de reagendamento. Especialista  informado ás  - "},
-    {"causa": "Agendamento cancelado", "motivo": "Falta De Equipamento - Acessórios Imobilizado", "mascara_modelo": "Atendimento não realizado por falta de  0 . Cliente  Informado em  - "},
-    {"causa": "Agendamento cancelado", "motivo": "Falta De Equipamento - Item Reservado Não Compatível", "mascara_modelo": "Atendimento não realizado por falta de  0 . Cliente  Informado em  - "},
-    {"causa": "Agendamento cancelado", "motivo": "Falta De Equipamento - Material", "mascara_modelo": "Atendimento não realizado por falta de  0 . Cliente  Informado em  - "},
-    {"causa": "Agendamento cancelado", "motivo": "Falta De Equipamento - Principal", "mascara_modelo": "Atendimento não realizado por falta de  0 . Cliente  Informado em  - "},
-    {"causa": "Agendamento cancelado", "motivo": "Instabilidade de Equipamento/Sistema", "mascara_modelo": "Atendimento finalizado em 0  não concluído devido à instabilidade de . Registrado teste/reinstalação em  - . Realizado contato com a central  -  e foi gerada a ASM "},
-    {"causa": "Agendamento cancelado", "motivo": "No-show Cliente – Ponto Fixo/Móvel", "mascara_modelo": "Cliente não compareceu para atendimento até às 0."},
-    {"causa": "Agendamento cancelado", "motivo": "No-show Técnico", "mascara_modelo": "Técnico 0 , em  - , não realizou o atendimento por motivo de "},
-    {"causa": "Agendamento cancelado", "motivo": "Ocorrência com Técnico – Não foi possível realizar atendimento", "mascara_modelo": "Técnico 0 , em  - , não realizou o atendimento por motivo de "},
-    {"causa": "Agendamento cancelado", "motivo": "Ocorrência Com Técnico - Sem Tempo Hábil Para Realizar O Serviço (Atendimento Parcial)", "mascara_modelo": "Não foi possível concluir o atendimento devido 0 . Cliente  às  -  foi informado sobre a necessidade de reagendamento."},
-    {"causa": "Agendamento cancelado", "motivo": "Ocorrência Com Técnico - Sem Tempo Hábil Para Realizar O Serviço (Não iniciado)", "mascara_modelo": "Não foi possível realizar o atendimento devido 0 . Cliente  - informado do reagendamento."},
-    {"causa": "Agendamento cancelado", "motivo": "Ocorrência Com Técnico - Sem Tempo Hábil Para Realizar O Serviço (Não iniciado)", "mascara_modelo": "Não foi possível realizar o atendimento devido 0 . Cliente  - informado do reagendamento."},
-    {"causa": "Agendamento cancelado", "motivo": "Ocorrência Com Técnico - Técnico Sem Habilidade Para Realizar Serviço", "mascara_modelo": "Não foi possível realizar o atendimento devido 0 . Cliente  foi informado sobre a necessidade de reagendamento."},
-    {"causa": "Agendamento cancelado", "motivo": "Perda/Extravio/Falta Do Equipamento/Equipamento Com Defeito", "mascara_modelo": "Não foi possível realizar o atendimento pois 0. Cliente recusou assinar termo."},
-    {"causa": "Agendamento cancelado", "motivo": "Serviço incompatível com a OS aberta", "mascara_modelo": "Não foi possível realizar o atendimento devido 0 . Cliente  às  -  foi informado sobre a necessidade de reagendamento."}
+    {
+        "causa": "Agendamento cancelado",
+        "motivo": "Alteração do tipo de serviço  – De assistência para reinstalação",
+        "mascara_modelo": "Não foi possível realizar o atendimento devido 0 . Cliente  foi informado sobre a necessidade de reagendamento."
+    },
+    {
+        "causa": "Agendamento cancelado",
+        "motivo": "Atendimento Improdutivo – Ponto Fixo/Móvel",
+        "mascara_modelo": "Veículo compareceu para atendimento, porém por 0, não foi possível realizar o serviço."
+    },
+    {
+        "causa": "Agendamento cancelado",
+        "motivo": "Cancelada a Pedido do Cliente",
+        "mascara_modelo": "Cliente 0 , contato via  em  - , informou indisponibilidade para o atendimento."
+    },
+    {
+        "causa": "Agendamento cancelado",
+        "motivo": "Cancelada a Pedido do Cliente",
+        "mascara_modelo": "Cliente 0 , contato via  em  - , informou indisponibilidade para o atendimento."
+    },
+    {
+        "causa": "Agendamento cancelado",
+        "motivo": "Cancelamento a pedido da RT",
+        "mascara_modelo": "Não foi possível realizar o atendimento devido 0 . Cliente  o  -  foi informado sobre a necessidade de reagendamento."
+    },
+    {
+        "causa": "Agendamento cancelado",
+        "motivo": "Cronograma de Instalação/Substituição de Placa",
+        "mascara_modelo": "Realizado atendimento com substituição de placa. Alteração feita pela OS 0."
+    },
+    {
+        "causa": "Agendamento cancelado",
+        "motivo": "Erro De Agendamento - Cliente desconhecia o agendamento",
+        "mascara_modelo": "Em contato com o cliente o mesmo informou que desconhecia o agendamento. Nome cliente: 0 / Data contato:  - "
+    },
+    {
+        "causa": "Agendamento cancelado",
+        "motivo": "Erro de Agendamento – Endereço incorreto",
+        "mascara_modelo": "Erro identificado no agendamento: 0 . Situação:. Cliente  - informado em "
+    },
+    {
+        "causa": "Agendamento cancelado",
+        "motivo": "Erro de Agendamento – Falta de informações na O.S.",
+        "mascara_modelo": "OS agendada apresentou erro de 0  e foi identificado através de . Realizado o contato com o cliente  - no dia  - "
+    },
+    {
+        "causa": "Agendamento cancelado",
+        "motivo": "Erro de Agendamento – O.S. agendada incorretamente (tipo/motivo/produto)",
+        "mascara_modelo": "OS agendada apresentou erro de 0  e foi identificado através de . Realizado o contato com o cliente  - no dia  - "
+    },
+    {
+        "causa": "Agendamento cancelado",
+        "motivo": "Erro de roteirização do agendamento - Atendimento móvel",
+        "mascara_modelo": "Não foi possível concluir o atendimento devido 0 . Cliente ás  -  foi informado sobre a necessidade de reagendamento. Especialista  informado ás  - "
+    },
+    {
+        "causa": "Agendamento cancelado",
+        "motivo": "Erro de roteirização do agendamento - Atendimento móvel",
+        "mascara_modelo": "Não foi possível concluir o atendimento devido 0 . Cliente ás  -  foi informado sobre a necessidade de reagendamento. Especialista  informado ás  - "
+    },
+    {
+        "causa": "Agendamento cancelado",
+        "motivo": "Falta De Equipamento - Acessórios Imobilizado",
+        "mascara_modelo": "Atendimento não realizado por falta de  0 . Cliente  Informado em  - "
+    },
+    {
+        "causa": "Agendamento cancelado",
+        "motivo": "Falta De Equipamento - Item Reservado Não Compatível",
+        "mascara_modelo": "Atendimento não realizado por falta de  0 . Cliente  Informado em  - "
+    },
+    {
+        "causa": "Agendamento cancelado",
+        "motivo": "Falta De Equipamento - Material",
+        "mascara_modelo": "Atendimento não realizado por falta de  0 . Cliente  Informado em  - "
+    },
+    {
+        "causa": "Agendamento cancelado",
+        "motivo": "Falta De Equipamento - Principal",
+        "mascara_modelo": "Atendimento não realizado por falta de  0 . Cliente  Informado em  - "
+    },
+    {
+        "causa": "Agendamento cancelado",
+        "motivo": "Instabilidade de Equipamento/Sistema",
+        "mascara_modelo": "Atendimento finalizado em 0  não concluído devido à instabilidade de . Registrado teste/reinstalação em  - . Realizado contato com a central  -  e foi gerada a ASM "
+    },
+    {
+        "causa": "Agendamento cancelado",
+        "motivo": "No-show Cliente – Ponto Fixo/Móvel",
+        "mascara_modelo": "Cliente não compareceu para atendimento até às 0."
+    },
+    {
+        "causa": "Agendamento cancelado",
+        "motivo": "No-show Técnico",
+        "mascara_modelo": "Técnico 0 , em  - , não realizou o atendimento por motivo de "
+    },
+    {
+        "causa": "Agendamento cancelado",
+        "motivo": "Ocorrência com Técnico – Não foi possível realizar atendimento",
+        "mascara_modelo": "Técnico 0 , em  - , não realizou o atendimento por motivo de "
+    },
+    {
+        "causa": "Agendamento cancelado",
+        "motivo": "Ocorrência Com Técnico - Sem Tempo Hábil Para Realizar O Serviço (Atendimento Parcial)",
+        "mascara_modelo": "Não foi possível concluir o atendimento devido 0 . Cliente  às  -  foi informado sobre a necessidade de reagendamento."
+    },
+    {
+        "causa": "Agendamento cancelado",
+        "motivo": "Ocorrência Com Técnico - Sem Tempo Hábil Para Realizar O Serviço (Não iniciado)",
+        "mascara_modelo": "Não foi possível realizar o atendimento devido 0 . Cliente  - informado do reagendamento."
+    },
+    {
+        "causa": "Agendamento cancelado",
+        "motivo": "Ocorrência Com Técnico - Sem Tempo Hábil Para Realizar O Serviço (Não iniciado)",
+        "mascara_modelo": "Não foi possível realizar o atendimento devido 0 . Cliente  - informado do reagendamento."
+    },
+    {
+        "causa": "Agendamento cancelado",
+        "motivo": "Ocorrência Com Técnico - Técnico Sem Habilidade Para Realizar Serviço",
+        "mascara_modelo": "Não foi possível realizar o atendimento devido 0 . Cliente  foi informado sobre a necessidade de reagendamento."
+    },
+    {
+        "causa": "Agendamento cancelado",
+        "motivo": "Perda/Extravio/Falta Do Equipamento/Equipamento Com Defeito",
+        "mascara_modelo": "Não foi possível realizar o atendimento pois 0. Cliente recusou assinar termo."
+    },
+    {
+        "causa": "Agendamento cancelado",
+        "motivo": "Serviço incompatível com a OS aberta",
+        "mascara_modelo": "Não foi possível realizar o atendimento devido 0 . Cliente  às  -  foi informado sobre a necessidade de reagendamento."
+    }
 ]
+
 
 # ------------------------------------------------------------
 # UTILITÁRIOS (normalização + regex tolerante)
@@ -130,7 +226,11 @@ def read_any(f):
 # ------------------------------------------------------------
 # Gatilhos da REGRA ESPECIAL → viram "No-show Cliente"
 # ------------------------------------------------------------
-ESPECIAIS_NO_SHOW_CLIENTE = ["Automático - PORTAL", "Michelin", "OUTRO"]
+ESPECIAIS_NO_SHOW_CLIENTE = [
+    "Automático - PORTAL",
+    "Michelin",
+    "OUTRO",
+]
 
 def eh_especial_no_show_cliente(valor: str) -> bool:
     v = canon(valor)
@@ -195,6 +295,9 @@ if "ultimas_regras_aplicadas" in st.session_state and st.session_state["ultimas_
 # ============================================================
 # Exportar regras (JSON)
 # ============================================================
+import json
+from datetime import datetime
+
 st.markdown("#### Exportar regras (JSON)")
 
 def _sort_key(r):
@@ -239,8 +342,6 @@ def categoria_por_motivo(motivo: str) -> str:
     return ""
 
 file = st.file_uploader("Exportação (xlsx/csv) — coluna única + (opcional) coluna especial", type=["xlsx","csv"])
-
-out = None  # será populado quando a pré-análise rodar
 
 if file:
     df = read_any(file)
@@ -392,276 +493,313 @@ if file:
 else:
     st.info("Envie a exportação; selecione a coluna única e (opcionalmente) a coluna especial.")
 
-# ============================================
-# NOVO MÓDULO 2 — CONFERÊNCIA (NO PRÓPRIO APP)
-# ============================================
+# ------------------------------------------------------------
+# MÓDULO 2 — CONFERÊNCIA (multi-duplas Robô × Atendente)
+# (ÚNICO BLOCO — evita DuplicateWidgetID)
+# ------------------------------------------------------------
 st.markdown("---")
-st.header("Módulo 2 — Conferência (dentro do app)")
+st.header("Módulo 2 — Conferência (Dupla checagem) — múltiplas comparações")
+st.markdown("""
+Envie o **relatório conferido pelo atendente** (xlsx/csv).  
+Mapeie **duplas de comparação** (coluna do **Robô** × coluna do **Atendente**).
 
-if out is None:
-    st.info("Para habilitar a conferência, rode a Pré-análise acima (carregue o arquivo e gere o resultado).")
-else:
-    # ---- Config & Aliases do Módulo 2 ---- #
-    RESULTADO_OPCOES_DEFAULT = [
-        "No-show Cliente",
-        "No-show Técnico",
-        "Erro Agendamento",
-        "Erro de dados",
-        "Falta de equipamentos",
-    ]
-    ALIASES = {
-        "os": ["O.S.", "OS", "Nº O.S.", "Nº OS", "OS_ID", "ID_OS"],
-        "motivo_detectado": ["Motivo detectado", "Motivo Detectado"],
-        "mascara_preenchida": ["Máscara prestador (preenchida)", "Mascara prestador (preenchida)", "Mascara prestador preenchida"],
-        "mascara_prestador": ["Máscara prestador", "Mascara prestador"],
-        "causa_motivo_mascara": ["Causa. Motivo. Máscara (extra)", "Causa. Motivo. Máscara", "Causa/Motivo/Máscara"],
-        "class_no_show": ["Classificação No-show", "Classificacao No-show", "Classificação No Show"],
-        "detalhe": ["Detalhe", "Detalhes"],
-        "resultado_no_show": ["Resultado No Show", "Resultado No-show", "Resultado NoShow"],
-        "atendente_designado": ["Atendente designado", "Atendente Designado", "Atendente"],
-    }
-    CONF_COLS_C1 = {
-        "motivo_ok_c1": "Motivo detectado correto? (C1)",
-        "mascara_ok_c1": "Máscara prestador correta? (C1)",
-        "resultado_show2_c1": "Resultado Show2 (C1)",
-        "mascara_atendente_c1": "Máscara Atendente (final) (C1)",
-        "conferente_c1": "Conferente (C1)",
-        "datahora_c1": "Data/Hora (C1)",
-    }
-    CONF_COLS_C2 = {
-        "motivo_ok_c2": "Motivo detectado correto? (C2)",
-        "mascara_ok_c2": "Máscara prestador correta? (C2)",
-        "resultado_show2_c2": "Resultado Show2 (C2)",
-        "mascara_atendente_c2": "Máscara Atendente (final) (C2)",
-        "conferente_c2": "Conferente (C2)",
-        "datahora_c2": "Data/Hora (C2)",
-        "decisao_c2": "Decisão C2",
-    }
-    DECISAO_C2_OPCOES = ["Concordo com C1", "Corrijo C1 (manter APP)", "Outro (editar campos)"]
-    DERIVED_COLS = {"veredito": "Veredito (auto)", "status": "Status"}
+**Status Geral da linha**
+- **OK**: todas as duplas mapeadas estão OK  
+- **Pendência (vazio)**: alguma dupla tem valor do atendente vazio  
+- **Divergência**: pelo menos uma dupla diverge
+""")
 
-    def _first_match(colnames: List[str], aliases: List[str]) -> str | None:
-        for a in aliases:
-            for c in colnames:
-                if c.strip().lower() == a.strip().lower():
-                    return c
+def read_any_loose(f):
+    if f is None:
         return None
-
-    def normalize_pre_df(pre_df: pd.DataFrame) -> pd.DataFrame:
-        df = pre_df.copy()
-        colmap = {}
-        for key, aliases in ALIASES.items():
-            found = _first_match(df.columns.tolist(), aliases)
-            colmap[key] = found if found else None
-        if not colmap.get("resultado_no_show"):
-            raise ValueError("Coluna obrigatória ausente: 'Resultado No Show' (ou alias).")
-        rename_pairs = {}
-        for key, src in colmap.items():
-            if src:
-                rename_pairs[src] = key
-        df = df.rename(columns=rename_pairs)
-        for k in ["os", "motivo_detectado", "mascara_preenchida", "mascara_prestador",
-                  "causa_motivo_mascara", "class_no_show", "detalhe", "atendente_designado"]:
-            if k not in df.columns:
-                df[k] = ""
+    name = f.name.lower()
+    if name.endswith(".csv"):
+        try:
+            return pd.read_csv(f, sep=None, engine="python", skip_blank_lines=True)
+        except Exception:
+            f.seek(0); return pd.read_csv(f)
+    try:
+        df = pd.read_excel(f, engine="openpyxl")
+        if str(df.columns[0]).lower().startswith("unnamed"):
+            f.seek(0)
+            df = pd.read_excel(f, engine="openpyxl", skiprows=1)
         return df
+    except Exception:
+        f.seek(0); return pd.read_excel(f)
 
-    def build_review_frame(base_df: pd.DataFrame, dupla: bool, conferente_padrao: str = "") -> pd.DataFrame:
-        review = pd.DataFrame(index=base_df.index)
-        review[CONF_COLS_C1["motivo_ok_c1"]] = pd.Series(False, index=base_df.index, dtype="bool")
-        review[CONF_COLS_C1["mascara_ok_c1"]] = pd.Series(False, index=base_df.index, dtype="bool")
-        review[CONF_COLS_C1["resultado_show2_c1"]] = base_df["resultado_no_show"].astype(str)
-        review[CONF_COLS_C1["mascara_atendente_c1"]] = ""
-        review[CONF_COLS_C1["conferente_c1"]] = conferente_padrao
-        review[CONF_COLS_C1["datahora_c1"]] = ""
-        if dupla:
-            review[CONF_COLS_C2["motivo_ok_c2"]] = pd.Series(False, index=base_df.index, dtype="bool")
-            review[CONF_COLS_C2["mascara_ok_c2"]] = pd.Series(False, index=base_df.index, dtype="bool")
-            review[CONF_COLS_C2["resultado_show2_c2"]] = base_df["resultado_no_show"].astype(str)
-            review[CONF_COLS_C2["mascara_atendente_c2"]] = ""
-            review[CONF_COLS_C2["conferente_c2"]] = ""
-            review[CONF_COLS_C2["datahora_c2"]] = ""
-            review[CONF_COLS_C2["decisao_c2"]] = ""
-        review[DERIVED_COLS["veredito"]] = "PENDENTE"
-        review[DERIVED_COLS["status"]] = "Pendente"
-        return review
+# normalizador (cobre 4 categorias)
+def normalize_outcome(x: str) -> str:
+    c = canon(x)
+    if "erro agendamento" in c or ("erro" in c and "agendamento" in c):
+        return "erro agendamento"
+    if "falta de equipamento" in c or "perda/extravio" in c or "equipamento com defeito" in c:
+        return "falta de equipamentos"
+    if "cliente" in c:
+        return "no-show cliente"
+    if "tecnico" in c or "técnico" in c:
+        return "no-show tecnico"
+    if "mascara correta" in c or "máscara correta" in c:
+        return "no-show cliente"
+    return c
 
-    @dataclass
-    class EncerramentoConfig:
-        dupla_checagem: bool = False
+conf_file = st.file_uploader("Relatório conferido (xlsx/csv)", type=["xlsx", "csv"], key="conf-multi")
 
-    def compute_veredito_and_status(row: pd.Series, app_res_col: str, cfg: EncerramentoConfig) -> Dict[str, str]:
-        motivo_ok_c1 = bool(row.get(CONF_COLS_C1["motivo_ok_c1"], False))
-        mascara_ok_c1 = bool(row.get(CONF_COLS_C1["mascara_ok_c1"], False))
-        show2_c1 = (row.get(CONF_COLS_C1["resultado_show2_c1"], "") or "").strip()
-        mascarafinal_c1 = (row.get(CONF_COLS_C1["mascara_atendente_c1"], "") or "").strip()
-        app_res = (row.get(app_res_col, "") or "").strip()
+if "pairs_n" not in st.session_state:
+    st.session_state.pairs_n = 3
 
-        if motivo_ok_c1 and mascara_ok_c1 and show2_c1 == app_res:
-            if not cfg.dupla_checagem:
-                return {"veredito": "APP_CORRETO", "status": "Aprovado (1/1)"}
+if conf_file:
+    dfr = read_any_loose(conf_file)
+    cols = list(dfr.columns)
+
+    st.subheader("Duplas de comparação (Robô × Atendente)")
+    cbtn1, cbtn2, _ = st.columns([1,1,6])
+    if cbtn1.button("➕ Adicionar dupla"):
+        st.session_state.pairs_n += 1
+    if st.session_state.pairs_n > 1 and cbtn2.button("➖ Remover última"):
+        st.session_state.pairs_n -= 1
+
+    pair_defs = []
+    for i in range(st.session_state.pairs_n):
+        c1, c2 = st.columns(2)
+        robo_col = c1.selectbox(f"Robô — coluna #{i+1}", cols, key=f"robot_col_{i}")
+        att_col  = c2.selectbox(f"Atendente — coluna #{i+1}", cols, key=f"att_col_{i}")
+        pair_defs.append((robo_col, att_col))
+
+    pair_labels = [f"{rc} × {ac}" for rc, ac in pair_defs]
+
+    def safe_sheet_name(name: str) -> str:
+        bad = r']:*?/\\['
+        for ch in bad:
+            name = name.replace(ch, "_")
+        name = name.strip()
+        return name[:31] if len(name) > 31 else name
+
+    linhas_status_geral = []
+    pair_status_cols = {i: [] for i in range(st.session_state.pairs_n)}
+    pair_robo_norm_cols = {i: [] for i in range(st.session_state.pairs_n)}
+    pair_att_norm_cols  = {i: [] for i in range(st.session_state.pairs_n)}
+
+    for _, r in dfr.iterrows():
+        tem_pendencia = False
+        tem_div = False
+        for i, (rc, ac) in enumerate(pair_defs):
+            robo_val = r.get(rc, "")
+            att_val  = r.get(ac, "")
+
+            rn = normalize_outcome(robo_val)
+            an = normalize_outcome(att_val)
+
+            pair_robo_norm_cols[i].append(rn)
+            pair_att_norm_cols[i].append(an)
+
+            if not str(att_val).strip():
+                pair_status_cols[i].append("Pendência (vazio)")
+                tem_pendencia = True
             else:
-                ver = "APP_CORRETO"
-                motivo_ok_c2 = bool(row.get(CONF_COLS_C2["motivo_ok_c2"], False))
-                mascara_ok_c2 = bool(row.get(CONF_COLS_C2["mascara_ok_c2"], False))
-                show2_c2 = (row.get(CONF_COLS_C2["resultado_show2_c2"], "") or "").strip()
-                decisao_c2 = (row.get(CONF_COLS_C2["decisao_c2"], "") or "").strip()
-                if motivo_ok_c2 and mascara_ok_c2 and show2_c2 == app_res:
-                    return {"veredito": ver, "status": "Aprovado (2/2)"}
-                elif decisao_c2 == "Corrijo C1 (manter APP)":
-                    return {"veredito": "ATENDENTE_ERRADO_APP_CORRETO", "status": "Aprovado (2/2)"}
-                elif decisao_c2 == "Concordo com C1":
-                    return {"veredito": ver, "status": "Aprovado (2/2)"}
+                if rn == an:
+                    pair_status_cols[i].append("OK")
                 else:
-                    return {"veredito": ver, "status": "Conferência 1"}
+                    pair_status_cols[i].append("Divergência")
+                    tem_div = True
 
-        houve_divergencia_c1 = (not motivo_ok_c1) or (not mascara_ok_c1) or (show2_c1 != app_res)
-        c1_preenchido = len(mascarafinal_c1) > 0 or show2_c1 != ""
+        if tem_pendencia:
+            linhas_status_geral.append("Pendência (vazio)")
+        else:
+            linhas_status_geral.append("Divergência" if tem_div else "OK")
 
-        if houve_divergencia_c1 and c1_preenchido:
-            if not cfg.dupla_checagem:
-                return {"veredito": "APP_ERRADO_ATENDENTE_CORRETO", "status": "Aprovado (1/1)"}
-            else:
-                decisao_c2 = (row.get(CONF_COLS_C2["decisao_c2"], "") or "").strip()
-                show2_c2 = (row.get(CONF_COLS_C2["resultado_show2_c2"], "") or "").strip()
-                if decisao_c2 == "Concordo com C1":
-                    return {"veredito": "APP_ERRADO_ATENDENTE_CORRETO", "status": "Aprovado (2/2)"}
-                elif decisao_c2 == "Corrijo C1 (manter APP)" and show2_c2 == app_res:
-                    return {"veredito": "ATENDENTE_ERRADO_APP_CORRETO", "status": "Aprovado (2/2)"}
-                elif decisao_c2 == "Outro (editar campos)":
-                    return {"veredito": "AMBOS_ERRADOS_REVISAR", "status": "Divergência"}
-                else:
-                    return {"veredito": "APP_ERRADO_ATENDENTE_CORRETO", "status": "Conferência 1"}
+    dfo = dfr.copy()
+    for i in range(st.session_state.pairs_n):
+        dfo[f"{pair_labels[i]} — Robô (norm)"] = pair_robo_norm_cols[i]
+        dfo[f"{pair_labels[i]} — Atendente (norm)"] = pair_att_norm_cols[i]
+        dfo[f"{pair_labels[i]} — Status"] = pair_status_cols[i]
+    dfo["Conferência — Status geral"] = linhas_status_geral
 
-        return {"veredito": "PENDENTE", "status": "Pendente"}
-
-    # ---------- UI do Módulo 2 ---------- #
-    conferente = st.text_input("Seu nome (conferente)", value="")
-    dupla = st.toggle("Ativar dupla checagem?", value=False, help="Se ligado, exige decisão do C2 para encerrar 2/2.")
-
-    base = normalize_pre_df(out)
-
-    fila_opts = ["(Todos)"] + sorted([x for x in base["atendente_designado"].astype(str).unique() if x])
-    fila_sel = st.selectbox("Filtrar por Atendente designado", fila_opts)
-    if fila_sel != "(Todos)":
-        base = base[base["atendente_designado"].astype(str) == str(fila_sel)]
-
-    if "_review_store" not in st.session_state:
-        st.session_state._review_store = {}
-
-    cache_key = f"review:{hash(tuple(base.index))}:{dupla}"
-    review = st.session_state._review_store.get(cache_key)
-    if review is None:
-        review = build_review_frame(base, dupla, conferente_padrao=conferente)
-        st.session_state._review_store[cache_key] = review
-    else:
-        if conferente and not review[CONF_COLS_C1["conferente_c1"]].any():
-            review[CONF_COLS_C1["conferente_c1"]] = conferente
-
-    composed = pd.concat([base.reset_index(drop=True), review.reset_index(drop=True)], axis=1)
-
-    col_cfg = {}
-    for c in ["os","motivo_detectado","mascara_preenchida","mascara_prestador",
-              "causa_motivo_mascara","class_no_show","detalhe","resultado_no_show","atendente_designado"]:
-        if c in composed.columns:
-            col_cfg[c] = st.column_config.TextColumn(c, disabled=True)
-
-    col_cfg[CONF_COLS_C1["motivo_ok_c1"]] = st.column_config.CheckboxColumn(CONF_COLS_C1["motivo_ok_c1"])
-    col_cfg[CONF_COLS_C1["mascara_ok_c1"]] = st.column_config.CheckboxColumn(CONF_COLS_C1["mascara_ok_c1"])
-
-    opcoes_result = sorted(list(set(list(RESULTADO_OPCOES_DEFAULT) + base["resultado_no_show"].astype(str).unique().tolist())))
-    col_cfg[CONF_COLS_C1["resultado_show2_c1"]] = st.column_config.SelectboxColumn(CONF_COLS_C1["resultado_show2_c1"], options=opcoes_result)
-    col_cfg[CONF_COLS_C1["mascara_atendente_c1"]] = st.column_config.TextColumn(CONF_COLS_C1["mascara_atendente_c1"], help="Preencha se discordar do app.")
-    col_cfg[CONF_COLS_C1["conferente_c1"]] = st.column_config.TextColumn(CONF_COLS_C1["conferente_c1"], default=conferente)
-    col_cfg[CONF_COLS_C1["datahora_c1"]] = st.column_config.TextColumn(CONF_COLS_C1["datahora_c1"], help="Preenchido automaticamente ao editar.")
-
-    if dupla:
-        col_cfg[CONF_COLS_C2["motivo_ok_c2"]] = st.column_config.CheckboxColumn(CONF_COLS_C2["motivo_ok_c2"])
-        col_cfg[CONF_COLS_C2["mascara_ok_c2"]] = st.column_config.CheckboxColumn(CONF_COLS_C2["mascara_ok_c2"])
-        col_cfg[CONF_COLS_C2["resultado_show2_c2"]] = st.column_config.SelectboxColumn(CONF_COLS_C2["resultado_show2_c2"], options=opcoes_result)
-        col_cfg[CONF_COLS_C2["mascara_atendente_c2"]] = st.column_config.TextColumn(CONF_COLS_C2["mascara_atendente_c2"])
-        col_cfg[CONF_COLS_C2["conferente_c2"]] = st.column_config.TextColumn(CONF_COLS_C2["conferente_c2"])
-        col_cfg[CONF_COLS_C2["datahora_c2"]] = st.column_config.TextColumn(CONF_COLS_C2["datahora_c2"])
-        col_cfg[CONF_COLS_C2["decisao_c2"]] = st.column_config.SelectboxColumn(CONF_COLS_C2["decisao_c2"], options=[""] + DECISAO_C2_OPCOES)
-
-    col_cfg[DERIVED_COLS["veredito"]] = st.column_config.TextColumn(DERIVED_COLS["veredito"], disabled=True)
-    col_cfg[DERIVED_COLS["status"]] = st.column_config.TextColumn(DERIVED_COLS["status"], disabled=True)
-
-    st.markdown("### Fila para conferência")
-    st.caption("À esquerda: pré-análise (somente leitura). Edite as colunas azuis para confirmar/ajustar.")
-
-    edited = st.data_editor(
-        composed,
-        num_rows="fixed",
-        use_container_width=True,
-        key="grid_conferencia",
-        column_config=col_cfg,
-        hide_index=True,
-    )
-
-    def _fill_ts(orig: pd.DataFrame, edt: pd.DataFrame) -> pd.DataFrame:
-        now = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        for fld in [CONF_COLS_C1["motivo_ok_c1"], CONF_COLS_C1["mascara_ok_c1"], CONF_COLS_C1["resultado_show2_c1"], CONF_COLS_C1["mascara_atendente_c1"]]:
-            if not edt.equals(orig):
-                mask_changed = edt[fld].astype(str) != orig.get(fld, edt[fld]).astype(str)
-                edt.loc[mask_changed, CONF_COLS_C1["datahora_c1"]] = now
-                if conferente:
-                    edt.loc[mask_changed, CONF_COLS_C1["conferente_c1"]] = conferente
-        if dupla:
-            for fld in [CONF_COLS_C2["motivo_ok_c2"], CONF_COLS_C2["mascara_ok_c2"], CONF_COLS_C2["resultado_show2_c2"], CONF_COLS_C2["mascara_atendente_c2"], CONF_COLS_C2["decisao_c2"]]:
-                mask_changed = edt[fld].astype(str) != orig.get(fld, edt[fld]).astype(str)
-                edt.loc[mask_changed, CONF_COLS_C2["datahora_c2"]] = now
-        return edt
-
-    edited = _fill_ts(composed, edited)
-
-    cfg = EncerramentoConfig(dupla_checagem=dupla)
-    verdicts, statuses = [], []
-    for _, r in edited.iterrows():
-        out_vs = compute_veredito_and_status(r, app_res_col="resultado_no_show", cfg=cfg)
-        verdicts.append(out_vs["veredito"])
-        statuses.append(out_vs["status"])
-    edited[DERIVED_COLS["veredito"]] = verdicts
-    edited[DERIVED_COLS["status"]] = statuses
-
-    keep_cols = list(CONF_COLS_C1.values()) + (list(CONF_COLS_C2.values()) if dupla else []) + list(DERIVED_COLS.values())
-    st.session_state._review_store[cache_key] = edited[keep_cols].copy()
-
-    st.divider()
-    st.subheader("Exportação / Progresso")
-
-    def _export_xlsx(df_out: pd.DataFrame) -> bytes:
-        buf = io.BytesIO()
-        with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-            df_out.to_excel(writer, index=False, sheet_name="Resultado")
-        buf.seek(0)
-        return buf.read()
-
-    merged_out = edited.copy()
-
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        xlsx_bytes = _export_xlsx(merged_out)
-        st.download_button("⬇️ Baixar Excel consolidado", data=xlsx_bytes, file_name="validacao_conferencia.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-    with c2:
-        json_bytes = merged_out.to_json(orient="records").encode("utf-8")
-        st.download_button("💾 Baixar checkpoint (JSON)", data=json_bytes, file_name="checkpoint_conferencia.json", mime="application/json")
-    with c3:
-        st.write(" ")
-        st.info("O Excel inclui colunas da pré-análise (read-only) + conferência (editáveis) + veredito/status.")
+    total = len(dfo)
+    ok   = int((dfo["Conferência — Status geral"] == "OK").sum())
+    pend = int((dfo["Conferência — Status geral"] == "Pendência (vazio)").sum())
+    div  = int((dfo["Conferência — Status geral"] == "Divergência").sum())
+    acc  = (ok / total * 100.0) if total else 0.0
 
     st.subheader("Resumo")
-    resumo = (
-        merged_out[DERIVED_COLS["status"]]
-        .value_counts(dropna=False)
-        .rename_axis("Status")
-        .reset_index(name="Qtd")
-    )
-    st.dataframe(resumo, use_container_width=True)
+    st.write(f"**Total:** {total}  |  **OK:** {ok}  |  **Divergência:** {div}  |  **Pendência:** {pend}  |  **Acurácia:** {acc:.1f}%")
 
-    st.caption(
-        "Encerramento por linha: 'Aprovado (1/1)' quando checagem simples concluir; "
-        "'Aprovado (2/2)' quando dupla checagem concluir; 'Divergência' quando há conflito sem decisão."
+    desvio_rt    = (div / total * 100.0) if total else 0.0
+    desvio_att   = (pend / total * 100.0) if total else 0.0
+    perc_rpa     = (ok / total * 100.0) if total else 0.0
+    perc_humano  = ((div + pend) / total * 100.0) if total else 0.0
+
+    st.subheader("Indicadores")
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("% Desvios RT", f"{desvio_rt:.1f}%")
+    k2.metric("% Desvios atendente", f"{desvio_att:.1f}%")
+    k3.metric("% RPA", f"{perc_rpa:.1f}%")
+    k4.metric("% Atendimento Humano", f"{perc_humano:.1f}%")
+
+    st.markdown(
+        f"""
+**Como interpretar estes indicadores:**
+
+- **{desvio_rt:.1f}% Desvios RT** = {desvio_rt:.1f}% das linhas deram **divergência** Robô × Atendente.  
+- **{desvio_att:.1f}% Desvios atendente** = {desvio_att:.1f}% das linhas ficaram **pendentes** (campo do atendente vazio).  
+- **{perc_rpa:.1f}% RPA** = {perc_rpa:.1f}% das linhas **bateram 100%** entre Robô e Atendente (sem intervenção).  
+- **{perc_humano:.1f}% Atendimento Humano** = {perc_humano:.1f}% das linhas **exigiram revisão humana** (divergência ou pendência).
+"""
     )
 
-# Fim — V1.1.0 (Pré-análise + Conferência integrada)
+    st.subheader("Indicadores por dupla de comparação")
+    st.caption("Cada dupla é nomeada como **Robô × Atendente** usando os nomes de coluna selecionados.")
+
+    indicadores_duplas = []
+    for i in range(st.session_state.pairs_n):
+        serie_status = pd.Series(pair_status_cols[i])
+        tot_p = int(serie_status.size)
+        ok_p  = int((serie_status == "OK").sum())
+        div_p = int((serie_status == "Divergência").sum())
+        pen_p = int((serie_status == "Pendência (vazio)").sum())
+
+        pct_ok  = (ok_p  / tot_p * 100.0) if tot_p else 0.0
+        pct_div = (div_p / tot_p * 100.0) if tot_p else 0.0
+        pct_pen = (pen_p / tot_p * 100.0) if tot_p else 0.0
+
+        indicadores_duplas.append({
+            "Dupla": pair_labels[i],
+            "Total": tot_p,
+            "OK": ok_p,           "% OK": round(pct_ok, 1),
+            "Divergência": div_p, "% Divergência": round(pct_div, 1),
+            "Pendência": pen_p,   "% Pendência": round(pct_pen, 1),
+        })
+
+    df_ind_duplas = pd.DataFrame(indicadores_duplas)
+    st.dataframe(df_ind_duplas, use_container_width=True)
+
+    with st.expander("Como ler os indicadores por dupla"):
+        st.markdown("""
+- **% OK**: proporção de linhas em que Robô e Atendente coincidiram **nesta dupla**.  
+- **% Divergência**: proporção de linhas com **diferença** nesta dupla.  
+- **% Pendência**: proporção de linhas que ficaram **sem preenchimento do atendente** nesta dupla.  
+> O **Status geral** da linha é OK apenas se **todas** as duplas mapeadas estiverem OK.
+""")
+
+    st.subheader("Matrizes de concordância (por dupla)")
+    matrizes = {}
+    for i in range(st.session_state.pairs_n):
+        try:
+            cm = pd.crosstab(
+                pd.Series(pair_robo_norm_cols[i], name="Robô (norm)"),
+                pd.Series(pair_att_norm_cols[i],  name="Atendente (norm)")
+            )
+            matrizes[i] = cm
+            st.markdown(f"**{pair_labels[i]}**")
+            st.dataframe(cm, use_container_width=True)
+        except Exception:
+            st.info(f"Não foi possível montar a matriz para a dupla **{pair_labels[i]}**.")
+
+    st.markdown("### Exportação — seleção de conteúdo")
+    exp_conf   = st.checkbox("Incluir aba **Conferencia**", value=True)
+    exp_kpis   = st.checkbox("Incluir aba **Indicadores**", value=True)
+    exp_duplas = st.checkbox("Incluir aba **Indicadores_por_dupla**", value=True)
+    exp_mats   = st.checkbox("Incluir **Matriz_<Dupla>**", value=True)
+
+    export_all_conf = st.checkbox(
+        "Conferencia: exportar **todas** as colunas",
+        value=True,
+        help="Desmarque para escolher manualmente as colunas da aba Conferencia."
+    )
+
+    if export_all_conf:
+        cols_export_conf = list(dfo.columns)
+    else:
+        st.caption("Escolha as colunas da aba **Conferencia** (ordem respeitada):")
+        favs = [c for c in dfo.columns if any(k in c for k in ["Status geral", "Status", "Robô (norm)", "Atendente (norm)"])]
+        base_defaults = [c for c in dfr.columns if c in dfo.columns][:5]
+        default_conf = list(dict.fromkeys(base_defaults + favs))[:20] or list(dfo.columns)[:20]
+        cols_export_conf = st.multiselect("Colunas para a aba Conferencia", options=list(dfo.columns), default=default_conf)
+        if not cols_export_conf:
+            st.warning("Sem colunas selecionadas para a aba Conferencia — exportarei todas.")
+            cols_export_conf = list(dfo.columns)
+
+    outbuf = io.BytesIO()
+    with pd.ExcelWriter(outbuf, engine="openpyxl") as w:
+        if exp_conf:
+            dfo[cols_export_conf].to_excel(w, index=False, sheet_name="Conferencia")
+        if exp_kpis:
+            indicadores = pd.DataFrame([
+                {"Métrica": "Total", "Valor": total},
+                {"Métrica": "OK", "Valor": ok},
+                {"Métrica": "Divergência", "Valor": div},
+                {"Métrica": "Pendência", "Valor": pend},
+                {"Métrica": "% Desvios RT", "Valor": round(desvio_rt, 1)},
+                {"Métrica": "% Desvios atendente", "Valor": round(desvio_att, 1)},
+                {"Métrica": "% RPA", "Valor": round(perc_rpa, 1)},
+                {"Métrica": "% Atendimento Humano", "Valor": round(perc_humano, 1)},
+                {"Métrica": "Acurácia (%)", "Valor": round(acc, 1)},
+            ])
+            indicadores.to_excel(w, index=False, sheet_name="Indicadores")
+        if exp_duplas:
+            df_ind_duplas.to_excel(w, index=False, sheet_name="Indicadores_por_dupla")
+        if exp_mats and matrizes:
+            for i, cm in matrizes.items():
+                sheet = safe_sheet_name(f"Matriz_{pair_labels[i]}")
+                cm.to_excel(w, sheet_name=sheet)
+
+    st.download_button(
+        "Baixar Excel da conferência (seleção aplicada)",
+        data=outbuf.getvalue(),
+        file_name="conferencia_no_show.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+else:
+    st.info("Para rodar a conferência, envie o relatório e mapeie as duplas (Robô × Atendente).")
+
+
+# ------------------------------------------------------------
+# MÓDULO 2 — CONFERÊNCIA INDIVIDUAL POR ATENDENTE
+# ------------------------------------------------------------
+st.markdown("---")
+st.header("Módulo 2 — Conferência dos atendentes")
+
+if 'out' in locals():
+    st.markdown("### Conferência por atendente")
+    nome_atendente = st.selectbox("Selecione seu nome", options=sorted(out["Atendente designado"].unique()))
+    df_atendente = out[out["Atendente designado"] == nome_atendente].copy()
+
+    st.markdown(f"**Total de registros para {nome_atendente}:** {len(df_atendente)}")
+
+    # Campos de conferência
+    df_atendente["Máscara conferida"] = ""
+    df_atendente["Classificação ajustada"] = ""
+    df_atendente["Status da conferência"] = ""
+    df_atendente["Observações"] = ""
+
+    classificacoes = ["No-show Cliente", "No-show Técnico", "Erro Agendamento", "Falta de equipamentos", "Correta"]
+    status_opcoes = ["✅ App acertou", "❌ App errou, atendente corrigiu", "⚠️ Atendente errou", "⏳ Pendente"]
+
+    for i, row in df_atendente.iterrows():
+        st.markdown("---")
+        st.markdown(f"**O.S.:** {row.get('O.S.', '')}")
+        st.markdown(f"**Texto original:** {row.get('Causa. Motivo. Máscara (extra)', '')}")
+        st.markdown(f"**Classificação pré-análise:** {row.get('Classificação No-show', '')}")
+        st.markdown(f"**Resultado No Show:** {row.get('Resultado No Show', '')}")
+        st.markdown(f"**Máscara modelo:** {row.get('Máscara prestador', '')}")
+
+        df_atendente.at[i, "Máscara conferida"] = st.text_input(f"Máscara conferida (linha {i})", value="", key=f"mask_{i}")
+        df_atendente.at[i, "Classificação ajustada"] = st.selectbox(f"Classificação ajustada (linha {i})", options=classificacoes, key=f"class_{i}")
+        df_atendente.at[i, "Status da conferência"] = st.selectbox(f"Status da conferência (linha {i})", options=status_opcoes, key=f"status_{i}")
+        df_atendente.at[i, "Observações"] = st.text_area(f"Observações (linha {i})", value="", key=f"obs_{i}")
+
+    st.markdown("### Tabela final da conferência")
+    st.dataframe(df_atendente, use_container_width=True)
+
+    # Exportação
+    buf_conf = io.BytesIO()
+    with pd.ExcelWriter(buf_conf, engine="openpyxl") as w:
+        df_atendente.to_excel(w, index=False, sheet_name="Conferencia")
+
+    st.download_button(
+        "Baixar Excel — Conferência do atendente",
+        data=buf_conf.getvalue(),
+        file_name=f"conferencia_{nome_atendente}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+else:
+    st.info("Realize a pré-análise no Módulo 1 para habilitar a conferência.")
