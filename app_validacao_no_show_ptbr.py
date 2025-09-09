@@ -22,37 +22,10 @@ from backend.repo_users import list_users, create_user, set_password, set_active
 # Boot: banco + SID + login
 # ------------------------------------------------------------
 init_db()                 # cria tabelas se não existirem
-# ====================== RESET/RECUPERAÇÃO DO ADMIN (remova depois) ======================
-# Cole logo após: init_db()
-from backend.repo_users import create_user, set_password, set_active
-
-NOVA_SENHA = "SenhaNova123!"  # defina aqui a senha temporária
-
-status = []
-try:
-    # tenta redefinir a senha do admin existente
-    set_password("admin", NOVA_SENHA)
-    status.append("Senha redefinida para o usuário 'admin'.")
-except Exception as e:
-    # se não existir, cria o admin do zero
-    try:
-        create_user("admin", "Admin", NOVA_SENHA, role="admin", active=1)
-        status.append("Usuário 'admin' criado do zero.")
-    except Exception as e2:
-        status.append(f"Falha ao criar/redefinir: {e} | {e2}")
-
-# garante que o admin esteja ATIVO (o login só carrega usuários active=1)
-try:
-    set_active("admin", 1)
-    status.append("Usuário 'admin' ativado (active=1).")
-except Exception:
-    pass
-
-st.warning("⚠️ Bloco de **reset/recuperação do admin** está ativo. **REMOVA após usar.**")
-st.code("login: admin\nsenha: " + NOVA_SENHA, language="bash")
-st.caption(" • ".join(status))
-# ================================================================================
-
+from backend.repo_users import list_users, credentials_from_db
+st.info("DEBUG – usuários vistos pelo app")
+st.write(list_users(include_inactive=True))
+st.write(credentials_from_db())
 
 sticky_sid_bootstrap()    # fixa/restaura ?sid= e estabiliza a sessão
 authenticator, ok, username, name, role = login()
