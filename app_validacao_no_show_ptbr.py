@@ -464,13 +464,13 @@ if "out" in locals() and out is not None:
         if col not in df_atendente.columns:
             df_atendente[col] = ""
 
-    classificacoes = [
-        "No-show Cliente",
-        "No-show Técnico",
-        "Erro Agendamento",
-        "Falta de equipamentos",
-        "Correta",
-    ]
+# Opções do seletor "Classificação ajustada"
+classificacoes = [
+    "No-show Cliente",
+    "No-show Técnico",
+    "Erro Agendamento",
+    "Falta de equipamentos",
+]
     status_opcoes = [
         "✅ App acertou",
         "❌ App errou, atendente corrigiu",
