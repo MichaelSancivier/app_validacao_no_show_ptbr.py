@@ -1,76 +1,77 @@
+# backend/repo_reviews.py
 from __future__ import annotations
+from typing import Optional
 import pandas as pd
-from sqlalchemy import select, update
-from .db import get_session
-from .models import Dataset, PreRow
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from backend.db import SessionLocal, Review
 
-def create_dataset(name: str, created_by: str, pre_df: pd.DataFrame) -> int:
-    with get_session() as s:
-        ds = Dataset(name=name, created_by=created_by)
-        s.add(ds); s.flush()  # ds.id disponível
+def upsert_reviews_from_df(df: pd.DataFrame, username: str, batch_id: Optional[str] = None) -> int:
+    """
+    Grava/atualiza as linhas de conferência do atendente no banco.
+    Retorna quantidade de linhas gravadas.
+    """
+    if df.empty:
+        return 0
 
-        recs = []
-        for _, r in pre_df.iterrows():
-            recs.append(PreRow(
-                dataset_id=ds.id,
-                os=str(r.get("O.S.", "")),
-                causa_detectada=str(r.get("Causa detectada","")),
-                motivo_detectado=str(r.get("Motivo detectado","")),
-                mascara_preenchida=str(r.get("Máscara prestador (preenchida)","")),
-                mascara_prestador=str(r.get("Máscara prestador","")),
-                causa_motivo_mascara=str(r.get("Causa. Motivo. Máscara (extra)","")),
-                class_no_show=str(r.get("Classificação No-show","")),
-                detalhe=str(r.get("Detalhe","")),
-                resultado_no_show=str(r.get("Resultado No Show","")),
-                atendente_designado=str(r.get("Atendente designado","")),
-            ))
-        s.add_all(recs)
-        s.commit()
-        return ds.id
+    wanted_cols = [
+        "O.S.", "Máscara conferida", "Classificação ajustada", "Status da conferência",
+        "Observações", "Validação automática (conferida)", "Causa detectada",
+        "Motivo detectado", "Resultado No Show"
+    ]
+    for c in wanted_cols:
+        if c not in df.columns:
+            df[c] = ""
 
-def list_datasets():
-    with get_session() as s:
-        return s.execute(select(Dataset.id, Dataset.name, Dataset.created_at, Dataset.status)).all()
+    n = 0
+    with SessionLocal() as s:
+        for _, row in df.iterrows():
+            os = str(row.get("O.S.", "")).strip() or None
+            if not os:
+                continue
+            # tenta localizar já existente
+            r = s.execute(
+                select(Review).where(Review.os == os, Review.atendente == username)
+            ).scalar_one_or_none()
 
-def load_rows_for_user(dataset_id: int, role: str, username: str) -> pd.DataFrame:
-    with get_session() as s:
-        if role == "admin":
-            rows = s.execute(select(PreRow).where(PreRow.dataset_id==dataset_id)).scalars().all()
-        else:
-            rows = s.execute(select(PreRow).where(
-                PreRow.dataset_id==dataset_id, PreRow.atendente_designado==username
-            )).scalars().all()
+            if r is None:
+                r = Review(os=os, atendente=username)
+                s.add(r)
 
-    df = pd.DataFrame([{
-        "row_id": r.id,
+            r.batch_id = batch_id or r.batch_id
+            r.mask_conferida = str(row.get("Máscara conferida", "") or "")
+            r.class_ajustada = str(row.get("Classificação ajustada", "") or "")
+            r.status = str(row.get("Status da conferência", "") or "")
+            r.obs = str(row.get("Observações", "") or "")
+            r.validacao = str(row.get("Validação automática (conferida)", "") or "")
+            r.causa = str(row.get("Causa detectada", "") or "")
+            r.motivo = str(row.get("Motivo detectado", "") or "")
+            r.resultado_no_show = str(row.get("Resultado No Show", "") or "")
+            try:
+                s.commit()
+                n += 1
+            except IntegrityError:
+                s.rollback()
+    return n
+
+
+def list_all_reviews_df() -> pd.DataFrame:
+    """Retorna tudo consolidado."""
+    with SessionLocal() as s:
+        q = s.execute(select(Review)).scalars().all()
+    if not q:
+        return pd.DataFrame()
+    return pd.DataFrame([{
         "O.S.": r.os,
-        "Causa detectada": r.causa_detectada,
-        "Motivo detectado": r.motivo_detectado,
-        "Máscara prestador (preenchida)": r.mascara_preenchida,
-        "Máscara prestador": r.mascara_prestador,
-        "Causa. Motivo. Máscara (extra)": r.causa_motivo_mascara,
-        "Classificação No-show": r.class_no_show,
-        "Detalhe": r.detalhe,
+        "Atendente": r.atendente,
+        "Máscara conferida": r.mask_conferida,
+        "Classificação ajustada": r.class_ajustada,
+        "Status da conferência": r.status,
+        "Observações": r.obs,
+        "Validação automática (conferida)": r.validacao,
+        "Causa detectada": r.causa,
+        "Motivo detectado": r.motivo,
         "Resultado No Show": r.resultado_no_show,
-        "Atendente designado": r.atendente_designado,
-        # campos de conferência (podem estar vazios)
-        "Máscara conferida": r.mascara_conferida or "",
-        "Validação automática (conferida)": r.validacao_conferida or "",
-        "Classificação ajustada": r.classificacao_ajustada or "",
-        "Status da conferência": r.status_conferencia or "",
-        "Observações": r.observacoes or "",
-    } for r in rows])
-    return df
-
-def save_conferencia(df_editado: pd.DataFrame):
-    with get_session() as s:
-        for _, r in df_editado.iterrows():
-            rid = int(r["row_id"])
-            s.execute(update(PreRow).where(PreRow.id==rid).values(
-                mascara_conferida=str(r.get("Máscara conferida","")),
-                validacao_conferida=str(r.get("Validação automática (conferida)","")),
-                classificacao_ajustada=str(r.get("Classificação ajustada","")),
-                status_conferencia=str(r.get("Status da conferência","")),
-                observacoes=str(r.get("Observações","")),
-            ))
-        s.commit()
+        "Atualizado em": r.updated_at or r.created_at,
+        "Lote": r.batch_id,
+    } for r in q])
