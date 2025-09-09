@@ -11,6 +11,8 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 import unicodedata
+from backend.repo_users import list_users
+
 
 # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 # Login + sessão estável (SID) + banco
