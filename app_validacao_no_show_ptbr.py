@@ -141,8 +141,8 @@ def detect_motivo_and_mask(full_text: str):
 # ============================================================
 # Streamlit (UI)
 # ============================================================
-st.set_page_config(page_title="Validador de No-show", layout="wide")
-st.title("Validador de No-show — PT-BR")
+st.set_page_config(page_title="Validador de No-show — v1.2.1", layout="wide")
+st.title("Validador de No-show — PT-BR (v1.2.1) — Sem dupla checagem")
 st.caption(
     "Módulo 1: pré-análise com regras embutidas + regra especial. "
     "Módulo 2: conferência no app (máscara conferida com validação automática)."
@@ -388,7 +388,7 @@ else:
 # MÓDULO 2 — Conferência (sem dupla checagem)
 # ============================================================
 st.markdown("---")
-st.header("Módulo 2 — Conferência")
+st.header("Módulo 2 — Conferência (sem dupla checagem)")
 
 # 1) reaproveita DF desta sessão; 2) fallback: parquet publicado pelo Admin
 out = st.session_state.get("out_df")
