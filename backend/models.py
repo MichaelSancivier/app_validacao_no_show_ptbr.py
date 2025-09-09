@@ -41,4 +41,3 @@ class Review(Base):
     detalhe_app = Column(Text, default="")
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-
