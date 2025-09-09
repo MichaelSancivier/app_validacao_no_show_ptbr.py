@@ -14,11 +14,10 @@ def _deep_to_dict(obj):
     return obj
 
 def _load_auth_config():
-    # 1) PRODUÇÃO: Secrets do Streamlit Cloud
+    # PRODUÇÃO: usa Secrets do Streamlit Cloud
     if "auth" in st.secrets:
-        return _deep_to_dict(st.secrets["auth"])  # st.secrets -> dict mutável
-
-    # 2) DEV (opcional): auth.yaml local (NÃO subir no GitHub)
+        return _deep_to_dict(st.secrets["auth"])
+    # DEV opcional: auth.yaml (não subir no GitHub)
     if os.path.exists("auth.yaml"):
         try:
             import yaml
@@ -27,10 +26,9 @@ def _load_auth_config():
                 return yaml.load(f, Loader=SafeLoader)
         except Exception as e:
             raise RuntimeError(f"Falha ao ler auth.yaml: {e}")
-
     raise RuntimeError(
         "Config de autenticação não encontrada. "
-        "Preencha st.secrets['auth'] no Streamlit Cloud (Settings → Secrets)."
+        "Defina st.secrets['auth'] em Settings → Secrets do Streamlit Cloud."
     )
 
 def login():
@@ -43,18 +41,15 @@ def login():
         cfg["cookie"]["expiry_days"],
     )
 
-    # Detecta assinatura do 'login' para ser compatível com qualquer versão
-    sig = inspect.signature(authenticator.login).parameters
-    if "location" in sig and "form_name" not in sig:
-        # NOVA API: só 'location'
-        name, auth_status, username = authenticator.login(location="main")
-    else:
-        # ANTIGA API: (form_name, location)
-        name, auth_status, username = authenticator.login("Login", "main")
-
-    # Papel do usuário (admin/atendente)
-    role = None
-    if auth_status:
-        role = cfg["credentials"]["usernames"][username].get("role", "atendente")
-
-    return authenticator, auth_status, username, name, role
+    # --- Chamada compatível com TODAS as versões ---
+    # 1) tente com enum Location (versões novas)
+    try:
+        try:
+            from streamlit_authenticator.utilities.constants import Location
+            loc = Location.MAIN
+        except Exception:
+            loc = "main"  # se enum não existir, use string
+        name, auth_status, username = authenticator.login(location=loc)
+    except TypeError:
+        # assinatura antiga: (form_name, location)
+        name, auth_status, username = auth_
