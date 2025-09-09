@@ -6,7 +6,7 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 
 # >>> garanta a pasta 'data/' e escolha o nome do arquivo
 DB_DIR = "data"
-DB_FILE = "no_show_v7.db"           # você pode trocar esse nome quando quiser resetar
+DB_FILE = "no_show_v8.db"           # você pode trocar esse nome quando quiser resetar
 os.makedirs(DB_DIR, exist_ok=True)  # <- cria a pasta no Cloud
 DB_URL = f"sqlite:///{os.path.join(DB_DIR, DB_FILE)}"
 
